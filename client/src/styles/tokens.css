@@ -1,0 +1,96 @@
+/* CreatorOS design tokens. Restrained palette: ink neutrals, a deep teal
+   primary for trust, amber for attention, violet reserved for AI-generated
+   content so drafts are always visually distinct from sent messages. */
+:root {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Code', Menlo, Consolas, monospace;
+
+  --bg: #f6f7f9;
+  --bg-elevated: #ffffff;
+  --bg-subtle: #f0f2f5;
+  --bg-sunken: #e9ecf1;
+  --border: #e2e6ec;
+  --border-strong: #cdd3dc;
+  --text: #0f172a;
+  --text-muted: #556274;
+  --text-faint: #8492a6;
+
+  --primary: #0f766e;
+  --primary-hover: #0b5f58;
+  --primary-soft: #e6f4f2;
+  --primary-text: #ffffff;
+
+  --accent: #b45309;
+  --accent-soft: #fef3e2;
+
+  --ai: #6d28d9;
+  --ai-soft: #f3eefe;
+
+  --success: #15803d;
+  --success-soft: #e8f6ec;
+  --warning: #b45309;
+  --warning-soft: #fdf3e1;
+  --danger: #b91c1c;
+  --danger-soft: #fdecec;
+  --info: #1d4ed8;
+  --info-soft: #e9effd;
+  --demo: #7c5e10;
+  --demo-soft: #fbf3d6;
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 4px 12px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 10px 30px rgba(15, 23, 42, 0.16);
+  --focus: 0 0 0 3px rgba(15, 118, 110, 0.35);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --sidebar-w: 236px;
+  --content-max: 1240px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0b1016;
+    --bg-elevated: #121922;
+    --bg-subtle: #18212c;
+    --bg-sunken: #1e2834;
+    --border: #243040;
+    --border-strong: #33425a;
+    --text: #e6ebf2;
+    --text-muted: #9aa8bb;
+    --text-faint: #6c7a8f;
+    --primary: #2bb3a5;
+    --primary-hover: #3cc7b8;
+    --primary-soft: #0f2d2b;
+    --primary-text: #04201d;
+    --accent: #f0a14a;
+    --accent-soft: #2e2213;
+    --ai: #a78bfa;
+    --ai-soft: #231b3a;
+    --success: #4ade80;
+    --success-soft: #11291a;
+    --warning: #f0a14a;
+    --warning-soft: #2e2213;
+    --danger: #f87171;
+    --danger-soft: #2f1515;
+    --info: #7aa2ff;
+    --info-soft: #152240;
+    --demo: #e5c565;
+    --demo-soft: #2b2512;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.25);
+    --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.5);
+    --focus: 0 0 0 3px rgba(43, 179, 165, 0.45);
+    color-scheme: dark;
+  }
+}

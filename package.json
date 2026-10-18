@@ -1,0 +1,28 @@
+{
+  "name": "creatoros",
+  "private": true,
+  "version": "0.1.0",
+  "description": "CreatorOS — India-first AI talent management platform for independent creators",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "dev:api": "npm run dev -w server",
+    "dev:web": "npm run dev -w client",
+    "worker": "npm run worker -w server",
+    "build": "npm run build -w client",
+    "start": "npm run start -w server",
+    "test": "npm run test -w server && npm run test -w client",
+    "lint": "npm run lint -w server && npm run lint -w client",
+    "db:init": "npm run db:init -w server",
+    "db:seed-demo": "npm run db:seed-demo -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}
