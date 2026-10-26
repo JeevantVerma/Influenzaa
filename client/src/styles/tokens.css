@@ -1,49 +1,54 @@
-/* CreatorOS design tokens. Restrained palette: ink neutrals, a deep teal
-   primary for trust, amber for attention, violet reserved for AI-generated
-   content so drafts are always visually distinct from sent messages. */
+/* CreatorOS design tokens.
+   Warm paper neutrals instead of grey admin chrome, one confident brand
+   colour (indigo), and fixed meanings for the rest: green is money, amber is
+   "needs you", violet is AI-written, mustard is demo data. Plus Jakarta Sans
+   is self-hosted (no third-party font requests). */
 :root {
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
+  --font-sans: 'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', Arial, sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Code', Menlo, Consolas, monospace;
 
-  --bg: #f6f7f9;
+  --bg: #f6f4f0;
   --bg-elevated: #ffffff;
-  --bg-subtle: #f0f2f5;
-  --bg-sunken: #e9ecf1;
-  --border: #e2e6ec;
-  --border-strong: #cdd3dc;
-  --text: #0f172a;
-  --text-muted: #556274;
-  --text-faint: #8492a6;
+  --bg-subtle: #f1eee8;
+  --bg-sunken: #e9e5dd;
+  --border: #e7e2d9;
+  --border-strong: #d3cdc1;
+  --text: #1c1a16;
+  --text-muted: #625d53;
+  --text-faint: #8f897d;
 
-  --primary: #0f766e;
-  --primary-hover: #0b5f58;
-  --primary-soft: #e6f4f2;
+  --primary: #4152e6;
+  --primary-hover: #3141d0;
+  --primary-soft: #eceefe;
   --primary-text: #ffffff;
 
-  --accent: #b45309;
-  --accent-soft: #fef3e2;
+  --accent: #b45f0c;
+  --accent-soft: #fdf1e1;
 
-  --ai: #6d28d9;
-  --ai-soft: #f3eefe;
+  --ai: #7c3aed;
+  --ai-soft: #f3edfe;
 
-  --success: #15803d;
-  --success-soft: #e8f6ec;
-  --warning: #b45309;
-  --warning-soft: #fdf3e1;
-  --danger: #b91c1c;
-  --danger-soft: #fdecec;
-  --info: #1d4ed8;
-  --info-soft: #e9effd;
+  --money: #0d7f56;
+  --money-soft: #e5f5ee;
+
+  --success: #12804f;
+  --success-soft: #e6f5ec;
+  --warning: #b45f0c;
+  --warning-soft: #fdf1e1;
+  --danger: #c0352b;
+  --danger-soft: #fdeceb;
+  --info: #2f5bd3;
+  --info-soft: #eaf0fd;
   --demo: #7c5e10;
   --demo-soft: #fbf3d6;
 
-  --radius-sm: 6px;
-  --radius: 10px;
-  --radius-lg: 14px;
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-  --shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 4px 12px rgba(15, 23, 42, 0.04);
-  --shadow-lg: 0 10px 30px rgba(15, 23, 42, 0.16);
-  --focus: 0 0 0 3px rgba(15, 118, 110, 0.35);
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(28, 26, 22, 0.05);
+  --shadow: 0 1px 3px rgba(28, 26, 22, 0.07), 0 6px 16px rgba(28, 26, 22, 0.05);
+  --shadow-lg: 0 12px 32px rgba(28, 26, 22, 0.16);
+  --focus: 0 0 0 3px rgba(65, 82, 230, 0.35);
 
   --space-1: 4px;
   --space-2: 8px;
@@ -53,44 +58,47 @@
   --space-6: 24px;
   --space-8: 32px;
 
-  --sidebar-w: 236px;
-  --content-max: 1240px;
+  --sidebar-w: 240px;
+  --content-max: 1180px;
+  --bottom-nav-h: 64px;
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #0b1016;
-    --bg-elevated: #121922;
-    --bg-subtle: #18212c;
-    --bg-sunken: #1e2834;
-    --border: #243040;
-    --border-strong: #33425a;
-    --text: #e6ebf2;
-    --text-muted: #9aa8bb;
-    --text-faint: #6c7a8f;
-    --primary: #2bb3a5;
-    --primary-hover: #3cc7b8;
-    --primary-soft: #0f2d2b;
-    --primary-text: #04201d;
-    --accent: #f0a14a;
-    --accent-soft: #2e2213;
-    --ai: #a78bfa;
-    --ai-soft: #231b3a;
-    --success: #4ade80;
-    --success-soft: #11291a;
-    --warning: #f0a14a;
-    --warning-soft: #2e2213;
-    --danger: #f87171;
-    --danger-soft: #2f1515;
-    --info: #7aa2ff;
-    --info-soft: #152240;
+    --bg: #11100e;
+    --bg-elevated: #1a1917;
+    --bg-subtle: #22201d;
+    --bg-sunken: #2a2824;
+    --border: #2e2b27;
+    --border-strong: #423e38;
+    --text: #f2efe9;
+    --text-muted: #aaa498;
+    --text-faint: #7b766c;
+    --primary: #8f9bff;
+    --primary-hover: #a6b0ff;
+    --primary-soft: #1f2242;
+    --primary-text: #0c0f2e;
+    --accent: #f2a65a;
+    --accent-soft: #33240f;
+    --ai: #b49bff;
+    --ai-soft: #251c3d;
+    --money: #4fd39b;
+    --money-soft: #12291f;
+    --success: #4fd39b;
+    --success-soft: #12291f;
+    --warning: #f2a65a;
+    --warning-soft: #33240f;
+    --danger: #ff8178;
+    --danger-soft: #331716;
+    --info: #8fb0ff;
+    --info-soft: #172341;
     --demo: #e5c565;
     --demo-soft: #2b2512;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.25);
-    --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.5);
-    --focus: 0 0 0 3px rgba(43, 179, 165, 0.45);
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 6px 16px rgba(0, 0, 0, 0.25);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+    --focus: 0 0 0 3px rgba(143, 155, 255, 0.45);
     color-scheme: dark;
   }
 }

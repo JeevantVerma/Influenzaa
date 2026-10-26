@@ -1,6 +1,7 @@
 import { ApprovalRequest, BrandProfile, Conversation, Deal, Message } from '../models/index.js';
 import { notFound, conflict } from '../lib/errors.js';
 import { cancelPendingJobs } from '../jobs/queue.js';
+import { replyDeadline } from './instagram/instagram.service.js';
 import { recordAudit } from './audit.service.js';
 
 export async function listConversations(creatorId, { status, page = 1, limit = 30 }) {
@@ -56,7 +57,7 @@ export async function getConversation(creatorId, id) {
     c.unreadInbound = 0;
     await c.save();
   }
-  return { ...c.toObject(), messages, brand, deal, pendingApprovals: approvals };
+  return { ...c.toObject(), messages, brand, deal, pendingApprovals: approvals, replyWindow: replyDeadline(c) };
 }
 
 export async function addNote(creatorId, id, content) {

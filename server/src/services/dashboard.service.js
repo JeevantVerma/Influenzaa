@@ -6,16 +6,17 @@ const ACTIVE_NEGOTIATION = ['positive_response', 'information_requested', 'offer
 export async function getDashboard(creatorId) {
   const now = new Date();
   const in14 = new Date(now.getTime() + 14 * 86_400_000);
-  const [discovery, profile, newOpps, negotiations, pendingApprovals, approvalsCount, campaigns, invoices, activity, unread] = await Promise.all([
+  const [discovery, profile, newOpps, newOppsCount, negotiations, pendingApprovals, approvalsCount, campaigns, invoices, activity, unread] = await Promise.all([
     getDiscoveryStatus(creatorId),
     CreatorProfile.findOne({ userId: creatorId }, { onboardingStatus: 1, publicName: 1, negotiationAutonomy: 1, 'commercialPolicy.currency': 1 }).lean(),
     Opportunity.find({ creatorId, excluded: false, status: 'new' }).sort({ overallScore: -1 }).limit(5).lean(),
+    Opportunity.countDocuments({ creatorId, excluded: false, status: 'new' }),
     Deal.find({ creatorId, status: 'open', negotiationState: { $in: ACTIVE_NEGOTIATION } }).sort({ updatedAt: -1 }).limit(8).lean(),
     ApprovalRequest.find({ creatorId, status: 'pending', expiresAt: { $gt: now } }).sort({ createdAt: -1 }).limit(5).lean(),
     ApprovalRequest.countDocuments({ creatorId, status: 'pending', expiresAt: { $gt: now } }),
     Campaign.find({ creatorId, status: { $ne: 'completed' } }).lean(),
     Invoice.find({ creatorId, status: { $in: ['issued', 'overdue', 'draft'] } }).sort({ dueDate: 1 }).limit(10).lean(),
-    AuditEvent.find({ creatorId }).sort({ timestamp: -1 }).limit(12).lean(),
+    AuditEvent.find({ creatorId }).sort({ timestamp: -1 }).limit(40).lean(), // the dashboard shows only creator-facing ones
     Notification.countDocuments({ creatorId, readAt: null }),
   ]);
   const brandIds = [...newOpps.map((o) => o.brandId), ...negotiations.map((d) => d.brandId), ...campaigns.map((c) => c.brandId)];
@@ -36,13 +37,15 @@ export async function getDashboard(creatorId) {
   ]);
   const currency = profile?.commercialPolicy?.currency || 'INR';
   const revenueReported = paidInvoices.filter((i) => i.currency === currency).reduce((s, i) => s + i.amountMinor, 0);
+  // Brands' current offers in active negotiations (what is on the table right now).
+  const offersOnTableMinor = negotiations.filter((d) => d.currency === currency).reduce((s, d) => s + (d.currentOffer?.totalAmountMinor || 0), 0);
 
   const nextActions = [];
   if (!profile?.onboardingStatus?.completed) nextActions.push({ kind: 'onboarding', label: 'Finish setting up your profile', link: '/onboarding' });
   if (approvalsCount) nextActions.push({ kind: 'approvals', label: `Review ${approvalsCount} pending approval${approvalsCount > 1 ? 's' : ''}`, link: '/approvals' });
   if (discovery.status === 'stopped' || discovery.status === 'awaiting_configuration') nextActions.push({ kind: 'discovery', label: 'Start sponsor discovery', link: '/opportunities' });
   if (discovery.status === 'running' && !discovery.worker.healthy) nextActions.push({ kind: 'worker', label: 'Background worker is offline — discovery is not running', link: '/settings?tab=integrations' });
-  if (newOpps.length) nextActions.push({ kind: 'opportunities', label: `Review ${newOpps.length} new opportunit${newOpps.length > 1 ? 'ies' : 'y'}`, link: '/opportunities?status=new' });
+  if (newOppsCount) nextActions.push({ kind: 'opportunities', label: `Review ${newOppsCount} new opportunit${newOppsCount > 1 ? 'ies' : 'y'}`, link: '/opportunities?status=new', count: newOppsCount });
   const overdueInv = invoices.filter((i) => i.status === 'overdue');
   if (overdueInv.length) nextActions.push({ kind: 'invoices', label: `${overdueInv.length} overdue invoice${overdueInv.length > 1 ? 's' : ''}`, link: '/campaigns' });
   if (deadlines.some((d) => d.overdue)) nextActions.push({ kind: 'deadlines', label: 'You have overdue deliverables', link: '/campaigns' });
@@ -52,12 +55,13 @@ export async function getDashboard(creatorId) {
     discovery: { status: discovery.status, headline: discovery.headline, monitoringActive: discovery.monitoringActive, nextRunAt: discovery.nextRunAt, lastSuccessfulRunAt: discovery.lastSuccessfulRunAt, lastError: discovery.lastError, worker: discovery.worker },
     newOpportunities: newOpps.map((o) => ({ _id: o._id, brand: brandOf(o.brandId), signalType: o.signalType, signalSummary: o.signalSummary, overallScore: o.overallScore, verificationStatus: o.verificationStatus, isDemo: o.isDemo })),
     negotiations: negotiations.map((d) => ({ _id: d._id, brand: brandOf(d.brandId), negotiationState: d.negotiationState, approvalState: d.approvalState, currentAmountMinor: d.currentOffer?.totalAmountMinor ?? null, currency: d.currency, updatedAt: d.updatedAt })),
-    pendingApprovals: { count: approvalsCount, items: pendingApprovals.map((a) => ({ _id: a._id, actionType: a.actionType, brandName: a.contextSnapshot?.brandName, createdAt: a.createdAt, expiresAt: a.expiresAt })) },
+    pendingApprovals: { count: approvalsCount, items: pendingApprovals.map((a) => ({ _id: a._id, actionType: a.actionType, brandName: a.contextSnapshot?.brandName, dealId: a.dealId, amountMinor: a.proposedAction?.terms?.totalAmountMinor ?? null, currency: a.proposedAction?.terms?.currency || currency, createdAt: a.createdAt, expiresAt: a.expiresAt })) },
+    newOpportunitiesCount: newOppsCount,
     deadlines,
     invoices: invoices.map((i) => ({ _id: i._id, invoiceNumber: i.invoiceNumber, amountMinor: i.amountMinor, currency: i.currency, status: i.status, dueDate: i.dueDate, campaignId: i.campaignId })),
     activity,
     unreadNotifications: unread,
-    outcomes: { pitchesSent: sentOutreach, positiveReplies, activeNegotiations: negotiations.length, dealsWon, activeCampaigns: campaigns.length, revenueReportedMinor: revenueReported, revenueNote: 'Creator-reported payments; CreatorOS does not process money.' },
+    outcomes: { pitchesSent: sentOutreach, positiveReplies, activeNegotiations: negotiations.length, dealsWon, activeCampaigns: campaigns.length, offersOnTableMinor, revenueReportedMinor: revenueReported, revenueNote: 'Creator-reported payments; CreatorOS does not process money.' },
     nextActions,
   };
 }

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useApi, useAction, useTaxonomy } from '../api/hooks.js';
-import { patch, post } from '../api/client.js';
+import { get, patch, post } from '../api/client.js';
 import { Badge, Button, Card, ChipSelect, ConfirmDialog, Field, Toggle } from './ui.jsx';
-import { dateTime } from '../lib/format.js';
+import { dateTime, relative } from '../lib/format.js';
 
 export const AUTONOMY = [
   { level: 0, name: 'Draft only', body: 'AI researches, summarises and drafts. You approve every outbound message.' },
@@ -83,7 +83,26 @@ export function EmailAuthorizationPanel() {
             <dl className="kv small">
               <dt>Authorised</dt><dd>{dateTime(email.authorizedAt)}</dd>
               <dt>Sender</dt><dd>Your name via CreatorOS &lt;{email.fromAddress}&gt;</dd>
-              <dt>Replies</dt><dd>Routed back to your CreatorOS inbox {email.inboundWebhookConfigured ? '' : '(inbound webhook not configured on this server)'}</dd>
+              <dt>Reply address</dt><dd className="mono small">{email.inbound?.replyExample}</dd>
+              <dt>Replies</dt>
+              <dd>
+                {email.inbound?.mode === 'imap' ? (
+                  <>
+                    Checked every minute in <span className="mono">{email.inbound.mailbox}</span> (read-only, only reply-address messages).{' '}
+                    {email.inbound.lastError ? (
+                      <span style={{ color: 'var(--danger)' }}>Last check failed: {email.inbound.lastError}</span>
+                    ) : email.inbound.lastSuccessAt ? (
+                      <span className="muted">Last checked {relative(email.inbound.lastSuccessAt)} · {email.inbound.matchedTotal} repl{email.inbound.matchedTotal === 1 ? 'y' : 'ies'} picked up so far.</span>
+                    ) : (
+                      <span className="muted">Not checked yet.</span>
+                    )}
+                  </>
+                ) : email.inbound?.mode === 'webhook' ? (
+                  email.inboundWebhookConfigured ? 'Received through the signed email webhook.' : 'Not set up on this server yet, so brand replies are not received.'
+                ) : (
+                  'Not received on this server.'
+                )}
+              </dd>
               {email.recentFailedSends > 0 && (<><dt>Failed sends (7d)</dt><dd><Badge tone="danger">{email.recentFailedSends}</Badge></dd></>)}
             </dl>
             <div><Button variant="danger" size="sm" loading={disconnect.isPending} onClick={() => disconnect.mutate()}>Revoke authorisation</Button></div>
@@ -95,6 +114,75 @@ export function EmailAuthorizationPanel() {
               <span>{email.consentText}</span>
             </label>
             <div><Button variant="primary" disabled={!consent || email.status === 'unavailable'} loading={connect.isPending} onClick={() => connect.mutate()}>Authorise email sending</Button></div>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+/** Instagram DMs: connect a professional account, see the inbox checker, disconnect. */
+export function InstagramPanel() {
+  const q = useApi('integrations', '/integrations');
+  const [consent, setConsent] = useState(false);
+  const [token, setToken] = useState('');
+  const connectToken = useAction(() => post('/integrations/instagram/token', { accessToken: token, consent: true }), {
+    invalidate: ['integrations'], success: 'Instagram connected', onSuccess: () => setToken(''),
+  });
+  const login = useAction(() => get('/integrations/instagram/login-url'), { onSuccess: (r) => { window.location.href = r.url; } });
+  const checkNow = useAction(() => post('/integrations/instagram/check-now'), { success: 'Checking your Instagram DMs now', onSuccess: () => setTimeout(() => q.refetch(), 4000) });
+  const disconnect = useAction(() => post('/integrations/instagram/disconnect'), { invalidate: ['integrations'], success: 'Instagram disconnected' });
+  const ig = q.data?.instagram;
+  if (!ig) return null;
+  const connected = ig.status === 'connected' || ig.status === 'degraded';
+  const tone = { connected: 'success', degraded: 'warning', disconnected: '' }[ig.status];
+  return (
+    <Card title="Instagram DMs" actions={<Badge tone={tone}>{ig.status === 'connected' ? `@${ig.username}` : ig.status === 'degraded' ? 'Needs reconnecting' : 'Not connected'}</Badge>}>
+      <div className="stack">
+        <p className="small muted">
+          CreatorOS reads new DMs on your Instagram professional account, turns brand messages into deals and drafts the replies. Messages from fans and friends are skipped and never stored.
+          Instagram only lets apps reply within 24 hours of the brand’s last message, and never send the first message: for pitches, CreatorOS writes the DM and you send it from Instagram.
+        </p>
+        {connected ? (
+          <>
+            <dl className="kv small">
+              <dt>Account</dt><dd>@{ig.username}{ig.accountType ? ` · ${ig.accountType === 'MEDIA_CREATOR' ? 'Creator' : ig.accountType.toLowerCase()}` : ''}</dd>
+              <dt>DMs</dt>
+              <dd>
+                {!ig.checksInbox ? 'Not checked automatically on this server.' : ig.lastError ? (
+                  <span style={{ color: 'var(--danger)' }}>{ig.lastError.message}</span>
+                ) : ig.lastSuccessAt && ig.lastConversationCount === 0 ? (
+                  <span style={{ color: 'var(--warning)' }}>
+                    Checked {relative(ig.lastSuccessAt)}, but Instagram shared no conversations with CreatorOS. On your phone, turn on Settings → Messages and story replies → Message controls → Connected tools → Allow access to messages.
+                    While the Meta app is in development, the account messaging you must also be an Instagram Tester on the app (App roles → Roles), with the invite accepted.
+                  </span>
+                ) : ig.lastSuccessAt ? (
+                  <span className="muted">Checked {relative(ig.lastSuccessAt)} · {ig.brandThreads} brand conversation{ig.brandThreads === 1 ? '' : 's'} so far.</span>
+                ) : (
+                  <span className="muted">Not checked yet. New DMs from now on are picked up within a minute.</span>
+                )}
+              </dd>
+              <dt>Access renews</dt><dd>{ig.tokenExpiresAt ? `automatically; current access ends ${dateTime(ig.tokenExpiresAt)}` : '—'}</dd>
+            </dl>
+            <div className="row wrap">
+              <Button size="sm" loading={checkNow.isPending} onClick={() => checkNow.mutate()}>Check DMs now</Button>
+              <Button variant="danger" size="sm" loading={disconnect.isPending} onClick={() => disconnect.mutate()}>Disconnect</Button>
+            </div>
+          </>
+        ) : (
+          <>
+            {ig.lastError && <div className="callout warning small">{ig.lastError.message}</div>}
+            <label className="checkbox small">
+              <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+              <span>{ig.consentText}</span>
+            </label>
+            {ig.loginAvailable && (
+              <div><Button variant="primary" disabled={!consent} loading={login.isPending} onClick={() => login.mutate()}>Connect with Instagram</Button></div>
+            )}
+            <Field label={ig.loginAvailable ? 'Or paste an access token' : 'Access token'} hint="While the Meta app is in development: Meta app dashboard → Instagram → API setup with Instagram login → Generate token for your tester account.">
+              <input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="IGAA…" />
+            </Field>
+            <div><Button variant={ig.loginAvailable ? 'secondary' : 'primary'} disabled={!consent || token.trim().length < 20} loading={connectToken.isPending} onClick={() => connectToken.mutate()}>Connect with token</Button></div>
           </>
         )}
       </div>

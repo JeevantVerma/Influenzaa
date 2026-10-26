@@ -1,14 +1,16 @@
 import { IntegrationConnection, ScheduledJob } from '../models/index.js';
-import { getEmailAdapter } from './email/index.js';
+import { getEmailAdapter, replyAddressFor } from './email/index.js';
+import { imapInboxStatus } from './email/imapInbox.js';
 import { aiStatus } from './ai/index.js';
 import { platformSources } from './discovery/sources/index.js';
 import { workerHealth } from '../jobs/health.js';
 import { getConfig } from '../config/env.js';
 import { recordAudit } from './audit.service.js';
 import { conflict } from '../lib/errors.js';
+import { instagramStatus } from './instagram/instagram.service.js';
 
 export const EMAIL_CONSENT_TEXT =
-  'I authorise CreatorOS to send sponsorship emails on my behalf from the CreatorOS platform address, showing my name, with replies routed back to CreatorOS. Messages disclose that they are AI-assisted. I can disconnect at any time.';
+  'I authorise CreatorOS to send sponsorship emails on my behalf from the sending address shown here, showing my name, with replies routed back to CreatorOS. Messages disclose that they are AI-assisted. I can disconnect at any time.';
 
 export async function listIntegrations(creatorId) {
   const [conns, emailStatus, worker, failedSends] = await Promise.all([
@@ -20,7 +22,7 @@ export async function listIntegrations(creatorId) {
   const email = conns.find((c) => c.provider === 'email');
   const emailState = !emailStatus.configured
     ? 'unavailable'
-    : !email || email.status === 'disconnected'
+    : !email || email.status === 'disconnected' || (emailStatus.mode === 'live' && email.status !== 'connected')
       ? 'disconnected'
       : emailStatus.mode === 'demo'
         ? 'demo'
@@ -39,7 +41,9 @@ export async function listIntegrations(creatorId) {
       fromAddress: getConfig().email.fromAddress,
       recentFailedSends: failedSends,
       inboundWebhookConfigured: !!getConfig().email.inboundWebhookSecret,
+      inbound: await inboundStatus(),
     },
+    instagram: await instagramStatus(creatorId),
     ai: aiStatus(),
     discoverySources: platformSources().map((s) => ({ id: s.id, label: s.label, isDemo: s.isDemo })),
     worker,
@@ -47,12 +51,16 @@ export async function listIntegrations(creatorId) {
       status: 'unavailable',
       detail: 'Planned. Requires an approved WhatsApp Business Platform account, message templates and opt-in. CreatorOS never accesses personal WhatsApp inboxes.',
     },
-    instagram: {
-      status: 'unavailable',
-      detail: 'Planned. Requires an Instagram professional account connected through official Meta APIs. Cold DMs are not automated. Log Instagram conversations manually as notes for now.',
-    },
     demoFeaturesEnabled: getConfig().demo.enabled,
   };
+}
+
+async function inboundStatus() {
+  const cfg = getConfig().email;
+  const mode = cfg.inbound.provider;
+  const replyExample = replyAddressFor('<conversation>', cfg);
+  if (mode === 'imap') return { mode, replyExample, mailbox: cfg.inbound.imap.user, ...(await imapInboxStatus(cfg)) };
+  return { mode, replyExample, webhookConfigured: !!cfg.inboundWebhookSecret };
 }
 
 export async function connectEmail(creatorId, { senderDisplayName }) {

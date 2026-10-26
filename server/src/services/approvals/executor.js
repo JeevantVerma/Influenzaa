@@ -33,6 +33,13 @@ export async function executeApprovedAction(approvalId, actor = { actorType: 'sy
     await recordAudit({ ...actor, creatorId: approval.creatorId, eventType: 'action.execution_failed', resourceType: 'approval', resourceId: approval._id, metadata: { reason } });
   };
 
+  // Check the message is still sendable before changing any deal state, so a
+  // cancelled or already-sent draft cannot leave the deal half-updated.
+  if (action.messageId && !(await Message.exists({ _id: action.messageId, creatorId: approval.creatorId, deliveryStatus: 'draft' }))) {
+    await fail('Message is no longer a draft');
+    throw conflict('This message was already sent or cancelled.');
+  }
+
   if (approval.dealId) {
     const deal = await Deal.findOne({ _id: approval.dealId, creatorId: approval.creatorId });
     if (!deal) {

@@ -115,14 +115,36 @@ export function setEmailAdapterForTests(a) {
   override = a;
 }
 
+/** The reply address for one conversation. */
+export function replyAddressFor(token, cfg = getConfig().email) {
+  if (cfg.replyToAddress) return cfg.replyToAddress.replace('{token}', token);
+  return `reply+${token}@${cfg.replyToDomain || domainOf(cfg.fromAddress)}`;
+}
+
+/** Pulls a conversation token out of recipient addresses (reply+TOKEN@… or the configured template). */
+export function replyTokenFromAddresses(addresses, cfg = getConfig().email) {
+  const patterns = [/reply\+([A-Za-z0-9_-]{10,64})@/i];
+  if (cfg.replyToAddress) {
+    const [before, after] = cfg.replyToAddress.split('{token}');
+    const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    patterns.unshift(new RegExp(`${esc(before)}([A-Za-z0-9_-]{10,64})${esc(after)}`, 'i'));
+  }
+  for (const a of addresses || []) {
+    for (const re of patterns) {
+      const m = re.exec(String(a));
+      if (m) return m[1];
+    }
+  }
+  return null;
+}
+
 export function buildOutboundEnvelope({ creatorName, replyToken, to, subject, text, inReplyTo, references }) {
   const cfg = getConfig().email;
-  const replyDomain = cfg.replyToDomain || domainOf(cfg.fromAddress);
   // Truthful sender identity: the platform address, sending on the creator's
   // behalf, with replies routed back to this specific conversation.
   return {
     from: `"${creatorName.replace(/"/g, '')} via ${cfg.fromName}" <${cfg.fromAddress}>`,
-    replyTo: `reply+${replyToken}@${replyDomain}`,
+    replyTo: replyAddressFor(replyToken, cfg),
     to,
     subject,
     text,

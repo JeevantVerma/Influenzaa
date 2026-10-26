@@ -43,7 +43,10 @@ export const SIGNAL_KINDS = {
   product_launch: { intent: 'medium_intent', label: 'New product launch' },
   regional_expansion: { intent: 'medium_intent', label: 'Regional expansion' },
   marketing_campaign: { intent: 'medium_intent', label: 'Relevant marketing campaign' },
+  paid_creator_partnerships: { intent: 'high_intent', label: 'Paying creators in your niche (Instagram paid partnerships)' },
+  creator_campaign_news: { intent: 'high_intent', label: 'Reported influencer / creator campaign' },
   similar_collaborations: { intent: 'medium_intent', label: 'Repeated collaborations with similar creators' },
+  funding_round: { intent: 'medium_intent', label: 'Recently raised funding' },
   category_match: { intent: 'low_intent', label: 'Operates in a matching category' },
 };
 
@@ -57,4 +60,65 @@ export function classifySignalText(text) {
   if (/expan|enters|new stores?|now in|opens in/.test(t)) return 'regional_expansion';
   if (/campaign|festive|diwali|collection|sale/.test(t)) return 'marketing_campaign';
   return 'category_match';
+}
+
+// Search vocabulary per niche, used by the news (GDELT) and web search (Serper) sources.
+export const NICHE_KEYWORDS = {
+  beauty: ['beauty brand', 'cosmetics', 'makeup'],
+  skincare: ['skincare', 'sunscreen', 'serum'],
+  fashion: ['fashion brand', 'apparel', 'ethnic wear'],
+  fitness: ['protein', 'sportswear', 'activewear', 'supplements'],
+  health: ['wellness brand', 'nutrition', 'supplements'],
+  food: ['snack brand', 'food brand', 'beverage'],
+  tech: ['smartphone', 'gadgets', 'consumer electronics'],
+  gaming: ['gaming', 'esports', 'gaming peripherals'],
+  finance: ['fintech app', 'investing app', 'credit card'],
+  education: ['edtech', 'learning app', 'online courses'],
+  travel: ['travel brand', 'luggage', 'hotel'],
+  lifestyle: ['lifestyle brand', 'd2c brand', 'home decor'],
+  parenting: ['baby care', 'kids brand', 'parenting'],
+  comedy: ['ott', 'streaming', 'snack brand'],
+  music: ['audio brand', 'headphones', 'music streaming'],
+  sports: ['sportswear', 'sports nutrition', 'footwear'],
+  sustainability: ['sustainable brand', 'eco-friendly', 'organic'],
+  pets: ['pet food', 'pet care', 'pet brand'],
+  home: ['home decor', 'kitchenware', 'furniture'],
+  automotive: ['electric scooter', 'car accessories', 'ev brand'],
+  books: ['publisher', 'audiobooks', 'books'],
+};
+
+// Instagram hashtags per niche where Indian creators post brand collaborations.
+export const NICHE_HASHTAGS = {
+  beauty: ['indianbeautyblogger', 'makeupindia', 'beautyinfluencerindia'],
+  skincare: ['skincareindia', 'indianskincare', 'skincarecommunityindia'],
+  fashion: ['indianfashionblogger', 'fashioninfluencerindia', 'ootdindia'],
+  fitness: ['fitnessindia', 'indianfitness', 'fitindia'],
+  health: ['healthylivingindia', 'wellnessindia', 'healthyindia'],
+  food: ['indianfoodblogger', 'foodbloggerindia', 'mumbaifoodie'],
+  tech: ['techindia', 'indiantech', 'gadgetsindia'],
+  gaming: ['indiangamer', 'gamingindia', 'bgmi'],
+  finance: ['personalfinanceindia', 'stockmarketindia', 'financeindia'],
+  education: ['studygramindia', 'upsc', 'learnwithinstagram'],
+  travel: ['indiatravelgram', 'travelblogger_india', 'incredibleindia'],
+  lifestyle: ['lifestyleblogger_india', 'indianinfluencer', 'mumbaiblogger'],
+  parenting: ['indianmomblogger', 'momblogger_india', 'parentingindia'],
+  comedy: ['indiancomedy', 'comedyreels_india', 'desicomedy'],
+  music: ['indianmusician', 'indiemusicindia', 'singersofindia'],
+  sports: ['indiansports', 'cricketlovers', 'runnersofindia'],
+  sustainability: ['sustainableindia', 'zerowasteindia', 'ecofriendlyindia'],
+  pets: ['dogsofindia', 'petsofindia', 'catsofindia'],
+  home: ['homedecorindia', 'indianhomes', 'homedecorideasindia'],
+  automotive: ['carsofindia', 'evindia', 'bikersofindia'],
+  books: ['bookstagramindia', 'indianbookstagram', 'booksofindia'],
+};
+
+/**
+ * The niches a source searches in this run: at most `max`, taking turns across
+ * time windows so a creator with many niches gets all of them covered over a few runs.
+ */
+export function rotateNiches(niches = [], max, now = new Date(), windowHours = 12) {
+  const list = [...new Set(niches)];
+  if (list.length <= max) return list;
+  const start = (Math.floor(now.getTime() / (windowHours * 3_600_000)) * max) % list.length;
+  return Array.from({ length: max }, (_, i) => list[(start + i) % list.length]);
 }

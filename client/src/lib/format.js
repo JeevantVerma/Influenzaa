@@ -61,15 +61,16 @@ export function negotiationTone(state) {
 }
 
 export const DELIVERY_LABELS = {
-  draft: { label: 'Draft — not sent', tone: 'ai' },
-  queued: { label: 'Approved · queued', tone: 'info' },
+  draft: { label: 'Draft, not sent yet', tone: 'ai' },
+  queued: { label: 'Approved, sending soon', tone: 'info' },
   sending: { label: 'Sending…', tone: 'info' },
   sent: { label: 'Sent', tone: 'success' },
-  simulated: { label: 'Simulated (demo) — not delivered', tone: 'demo' },
-  failed: { label: 'Failed — not sent', tone: 'danger' },
-  cancelled: { label: 'Cancelled — not sent', tone: '' },
+  simulated: { label: 'Demo, not delivered', tone: 'demo' },
+  failed: { label: 'Not sent: failed', tone: 'danger' },
+  cancelled: { label: 'Cancelled', tone: '' },
   received: { label: 'Received', tone: 'primary' },
   logged: { label: 'Manual note', tone: '' },
+  sent_by_creator: { label: 'Sent by you on Instagram', tone: 'success' },
 };
 
 export const DELIVERABLES = {
@@ -92,3 +93,85 @@ export function deliverablesText(list = []) {
   if (!list?.length) return '—';
   return list.map((d) => `${d.quantity || 1} × ${DELIVERABLES[d.type] || d.type}`).join(', ');
 }
+
+// Where a piece of discovery evidence came from, in plain words.
+export const EVIDENCE_SOURCES = {
+  demo: 'Demo dataset',
+  rss: 'Brand newsroom feed',
+  brave: 'Web search (Brave)',
+  gdelt: 'News',
+  news: 'News',
+  serper: 'Web search',
+  instagram: 'Instagram (via Apify)',
+  instagram_dm: 'Instagram DM',
+  brand_website: "Brand's own website",
+  manual: 'Added manually',
+};
+
+// Plain-language labels used across screens (no internal jargon).
+export const SIGNAL_LABELS = {
+  high_intent: { label: 'Strong signal', tone: 'success', help: 'The brand is actively working with creators or runs a creator programme' },
+  medium_intent: { label: 'Good timing', tone: 'info', help: 'A launch, campaign or expansion that often comes with creator work' },
+  low_intent: { label: 'Category fit', tone: '', help: 'Fits your niche, but no sign yet that they are hiring creators' },
+};
+
+export const CHECK_LABELS = {
+  ok: 'Fine',
+  warning: 'Worth a look',
+  missing: 'Not mentioned',
+  requires_approval: 'Needs your OK',
+  violation: 'Outside your limits',
+};
+
+export const RECOMMENDATION_LABELS = {
+  accept: { label: 'Accept it', tone: 'success', verb: 'Accepting looks reasonable' },
+  counter: { label: 'Ask for more', tone: 'info', verb: 'We suggest a counteroffer' },
+  clarify: { label: 'Ask questions first', tone: 'warning', verb: 'Some terms are unclear' },
+  decline: { label: 'Turn it down', tone: 'danger', verb: 'This offer is far from your limits' },
+  escalate: { label: 'Your call', tone: 'warning', verb: 'This needs your judgement' },
+};
+
+/** "Approve your counteroffer to" + brand name. */
+export const APPROVAL_TEXT = {
+  send_pitch: 'Approve your pitch to',
+  send_follow_up: 'Approve a follow-up to',
+  send_counteroffer: 'Approve your counteroffer to',
+  send_reply: 'Approve your reply to',
+  accept_offer: 'Confirm accepting the offer from',
+  decline_offer: 'Confirm declining',
+  send_payment_reminder: 'Approve a payment reminder to',
+};
+
+export const APPROVAL_STATUS = {
+  pending: { label: 'Waiting for you', tone: 'warning' },
+  approved: { label: 'Approved, sending', tone: 'info' },
+  executed: { label: 'Done', tone: 'success' },
+  rejected: { label: 'You turned it down', tone: '' },
+  expired: { label: 'Expired', tone: '' },
+  superseded: { label: 'Replaced by a newer version', tone: '' },
+  revoked: { label: 'Stopped before sending', tone: '' },
+  failed: { label: 'Failed', tone: 'danger' },
+};
+
+/** Splits an outgoing email into what the creator wrote and the footer CreatorOS adds. */
+export const DM_DISCLOSURE = '— sent via CreatorOS (AI-assisted)';
+
+export function splitSignature(content = '') {
+  const dm = content.indexOf(`\n\n${DM_DISCLOSURE}`);
+  if (dm !== -1) return [content.slice(0, dm), DM_DISCLOSURE];
+  const i = content.indexOf('\n\n—\n');
+  return i === -1 ? [content, ''] : [content.slice(0, i), content.slice(i + 2)];
+}
+
+/** What a brand's reply is, in plain words. */
+export const INTENT_LABELS = {
+  offer: 'Made an offer',
+  acceptance: 'Agreed',
+  positive_interest: 'Interested',
+  information_request: 'Asking for details',
+  decline: 'Not interested',
+  opt_out: 'Asked not to be contacted',
+  out_of_office: 'Out of office',
+  question: 'Has a question',
+  other: 'Replied',
+};

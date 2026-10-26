@@ -1,5 +1,5 @@
 import { findAmounts } from '../../lib/amounts.js';
-import { classifyZod, extractZod, draftZod } from './schemas.js';
+import { classifyZod, extractZod, draftZod, brandSignalsZod } from './schemas.js';
 import { pitchTemplate, negotiationTemplate } from './templates.js';
 
 // Deterministic, rule-based stand-in for an LLM. Only available in
@@ -28,6 +28,7 @@ export function mockClassify({ text }) {
   if (/unsubscribe|do not contact|don't contact|remove (me|us) from|stop (emailing|contacting)|not contact (me|us) again/.test(t)) [intent, confidence] = ['opt_out', 0.95];
   else if (/out of (the )?office|on leave|auto-?reply|away until|automatic reply/.test(t)) [intent, confidence] = ['out_of_office', 0.9];
   else if (/not interested|no budget|not a (good )?fit|pass on this|have to decline|won't be able to|unable to proceed|not moving forward/.test(t)) [intent, confidence] = ['decline', 0.85];
+  else if (/deal done|it'?s a deal|we accept|we agree|agreed|deal is on|go ahead with (your|the) (proposal|terms)/.test(t)) [intent, confidence] = ['acceptance', 0.8];
   else if (amounts.length || /\bbarter\b|we can offer|our budget|we'd like to offer|we would like to offer|proposal:/.test(t)) [intent, confidence] = ['offer', 0.8];
   else if (/rate card|media kit|your rates|your pricing|commercials|what (are|would be) your (charges|fees)|audience (data|insights|demographics)/.test(t)) [intent, confidence] = ['information_request', 0.8];
   else if (/interested|love to|sounds (great|good)|let'?s (discuss|connect|talk)|happy to explore|keen to/.test(t)) [intent, confidence] = ['positive_interest', 0.75];
@@ -37,6 +38,7 @@ export function mockClassify({ text }) {
     confidence,
     summary: `Rule-based classification (development mock): ${intent.replace(/_/g, ' ')}.`,
     mentions_compensation: amounts.length > 0,
+    business_inquiry: intent !== 'other' && intent !== 'out_of_office' && /collab|partner|sponsor|campaign|brand|promot|paid|barter|offer|reel|budget/.test(t),
   });
 }
 
@@ -108,9 +110,31 @@ export function mockExtract({ text }) {
     publish_date: null,
     kill_fee_percent: kill ? Number(kill[1]) : null,
     other_conditions: [],
+    final_offer: /final offer|best and final|take it or leave it|non-?negotiable|call (the|this) deal off|walk away/.test(t),
     missing_terms: missing,
     ambiguities: amounts.length > 2 ? ['Several amounts are mentioned; confirm which one is the total fee.'] : [],
     summary: `Rule-based extraction (development mock): ${paymentType ?? 'unclear'} offer${total ? ` of ${total}` : ''} for ${deliverables.length || 'unspecified'} deliverable type(s).`,
+  });
+}
+
+const SIGNAL_VERBS = [
+  [/\b(launches|launched|unveils|unveiled|introduces|introduced|debuts)\b/i, 'product_launch'],
+  [/\b(raises|raised|secures|bags)\b/i, 'funding_round'],
+  [/\b(expands|enters|opens)\b/i, 'regional_expansion'],
+  [/\b(ropes in|signs|appoints)\b.*\bambassador\b|\bbrand ambassador\b/i, 'brand_ambassador'],
+  [/\binfluencer|creator (campaign|programme|program)\b/i, 'creator_campaign'],
+];
+
+/** Headline-based brand extraction: "<Brand> launches …". The quote is copied verbatim from the text. */
+export function mockBrandSignals({ title, text }) {
+  const m = /^([A-Z][\w&'.-]*(?:\s+[A-Z][\w&'.-]*){0,3})\s+(?:launches|launched|unveils|introduces|debuts|raises|raised|secures|bags|expands|enters|opens|ropes in|signs)\b/.exec(String(title || ''));
+  if (!m) return brandSignalsZod.parse({ brands: [] });
+  const name = m[1];
+  const sentence = String(text || '').split(/(?<=[.!?])\s+/).find((s) => s.includes(name) && s.length >= 10);
+  if (!sentence) return brandSignalsZod.parse({ brands: [] });
+  const kind = SIGNAL_VERBS.find(([re]) => re.test(title))?.[1] || 'other';
+  return brandSignalsZod.parse({
+    brands: [{ name, website: null, is_consumer_brand: true, signal_kind: kind, product_or_campaign: null, evidence_quote: sentence.slice(0, 400), summary: `Rule-based extraction (development mock) from the headline: ${title}`.slice(0, 300) }],
   });
 }
 
@@ -128,5 +152,8 @@ export const mockProvider = {
   },
   async draftNegotiation(input) {
     return { data: draftZod.parse(negotiationTemplate(input)), provider: 'mock', model: 'rules-v1' };
+  },
+  async extractBrandSignals(input) {
+    return { data: mockBrandSignals(input), provider: 'mock', model: 'rules-v1' };
   },
 };

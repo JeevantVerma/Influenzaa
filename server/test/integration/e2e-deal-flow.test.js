@@ -34,10 +34,15 @@ async function approve(c, approvalId, extra = {}) {
   return c.post(`/approvals/${approvalId}/approve`, { actionHash: a.actionHash, ...extra });
 }
 
+/** Injects a simulated reply, runs the inbound.process job, and returns its result. */
 async function simulate(c, conversationId, text) {
   const res = await c.post(`/conversations/${conversationId}/simulate-inbound`, { text });
-  expect(res.status).toBe(201);
-  return res.body;
+  expect(res.status).toBe(202);
+  expect((await Message.findById(res.body.messageId).lean()).inboundProcessing.status).toBe('pending');
+  await drainWorker();
+  const job = await ScheduledJob.findOne({ idempotencyKey: `inbound:${res.body.messageId}` }).lean();
+  expect(job.status).toBe('succeeded');
+  return job.result;
 }
 
 describe('end-to-end sponsorship workflow', () => {
@@ -206,12 +211,119 @@ describe('mandatory negative tests', () => {
     expect(last.failureReason).toMatch(/suppressed/);
   });
 
+  it('keeps every email in one thread and remembers terms the brand stated earlier', async () => {
+    const c = await signUp(ctx.app);
+    await onboard(c);
+    const sent = [];
+    setEmailAdapterForTests({ name: 'capture', mode: 'demo', send: async (msg) => { sent.push(msg); return { status: 'simulated', provider: 'demo', providerMessageId: msg.messageId }; }, status: async () => ({ provider: 'capture', mode: 'demo', configured: true, healthy: true }) });
+    try {
+      const { approvalId, conversationId, dealId } = await startOutreach(c);
+      await approve(c, approvalId);
+      await drainWorker();
+      const pitch = sent[0];
+      const first = await simulate(c, conversationId, 'We can offer ₹35,000 for 1 Instagram reel, usage 30 days, net 30, 2 revisions.');
+      expect(first.counterApprovalId).toBeTruthy();
+      // The next email doesn't repeat the fee: it is carried forward, not lost.
+      const second = await simulate(c, conversationId, 'We can offer 1 Instagram reel with 50% advance, as discussed.');
+      const deal = await Deal.findById(dealId).lean();
+      expect(deal.currentOffer.totalAmountMinor).toBe(3_500_000);
+      expect(deal.currentOffer.paymentTerms.advancePercent).toBe(50);
+      expect(deal.offerHistory.at(-1).extraction.carriedForward).toContain('fee');
+      expect(deal.offerHistory.at(-1).extraction.missingTerms.join(' ')).not.toMatch(/amount|fee/i);
+
+      await approve(c, second.counterApprovalId);
+      await drainWorker();
+      const reply = sent.at(-1);
+      const inbound = await Message.find({ conversationId, direction: 'inbound' }).sort({ createdAt: 1 }).lean();
+      expect(reply.subject).toBe(`Re: ${pitch.subject}`);
+      expect(reply.inReplyTo).toBe(inbound.at(-1).providerMessageId);
+      expect(reply.references).toEqual(expect.arrayContaining([pitch.messageId, inbound[0].providerMessageId, inbound[1].providerMessageId]));
+    } finally {
+      setEmailAdapterForTests(null);
+    }
+  });
+
+  it('comes down step by step, and prepares an acceptance when the brand makes a final offer above the minimum', async () => {
+    const c = await signUp(ctx.app);
+    await onboard(c);
+    const { approvalId, conversationId, dealId } = await startOutreach(c);
+    await approve(c, approvalId);
+    await drainWorker();
+    const counterOf = async (id) => (await ApprovalRequest.findById(id).lean()).proposedAction.terms.totalAmountMinor;
+
+    const r1 = await simulate(c, conversationId, 'We can offer ₹22,000 for 1 Instagram reel.');
+    expect(await counterOf(r1.counterApprovalId)).toBe(3_000_000); // opens at the preferred rate
+    await approve(c, r1.counterApprovalId);
+    await drainWorker();
+
+    const r2 = await simulate(c, conversationId, 'We can only do ₹22,000 for 1 Instagram reel.');
+    expect(await counterOf(r2.counterApprovalId)).toBe(2_600_000); // halfway from ₹30,000 towards ₹22,000
+    await approve(c, r2.counterApprovalId);
+    await drainWorker();
+
+    const r3 = await simulate(c, conversationId, '₹22,000 for 1 Instagram reel is our final offer, otherwise we will call the deal off.');
+    expect(r3.recommendation).toBe('accept');
+    expect(r3.counterApprovalId).toBeUndefined();
+    const acceptance = await ApprovalRequest.findById(r3.acceptApprovalId).lean();
+    expect(acceptance).toMatchObject({ actionType: 'accept_offer', status: 'pending', requiresExplicitConfirmation: true });
+    expect(acceptance.proposedAction.terms).toMatchObject({ totalAmountMinor: 2_200_000, revisionsIncluded: 2, paymentTerms: { netDays: 30 } });
+    expect((await Deal.findById(dealId).lean()).offerHistory.at(-1).extraction.finalOffer).toBe(true);
+  });
+
+  it('after an acceptance, a brand confirming the deal gets a thank-you draft, never a counteroffer', async () => {
+    const c = await signUp(ctx.app);
+    await onboard(c);
+    const { approvalId, conversationId, dealId } = await startOutreach(c);
+    await approve(c, approvalId);
+    await drainWorker();
+    await simulate(c, conversationId, 'We can offer ₹24,000 for 1 Instagram reel.');
+    const final = await simulate(c, conversationId, '₹24,000 for 1 Instagram reel is our final offer.');
+    await approve(c, final.acceptApprovalId, { confirm: true });
+    await drainWorker();
+    expect((await Deal.findById(dealId).lean()).negotiationState).toBe('agreement_pending');
+
+    // Logistics only ("by 26 October", documents): a confirmation, even when it reads like terms.
+    const done = await simulate(c, conversationId, 'Ok, deal done then. We will share the documents next week. Please have the reel ready by 26 October, ₹24,000 as agreed.');
+    expect(done.agreed).toBe(true);
+    expect(done.counterApprovalId).toBeUndefined();
+    const ack = await ApprovalRequest.findById(done.replyApprovalId).lean();
+    expect(ack.actionType).toBe('send_reply');
+    expect(await ApprovalRequest.countDocuments({ dealId, actionType: 'send_counteroffer', status: 'pending' })).toBe(0);
+    expect((await Deal.findById(dealId).lean()).negotiationState).toBe('agreement_pending');
+
+    // A real change to the agreed fee goes to the creator; nothing is drafted.
+    const changed = await simulate(c, conversationId, 'Actually we can only pay ₹18,000 for 1 Instagram reel now.');
+    expect(changed.reopenedAgreement).toBe(true);
+    expect(changed.counterApprovalId).toBeUndefined();
+    expect(changed.acceptApprovalId).toBeUndefined();
+  });
+
+  it('a brand agreeing to the counteroffer marks the terms agreed and drafts a thank-you', async () => {
+    const c = await signUp(ctx.app);
+    await onboard(c);
+    const { approvalId, conversationId, dealId } = await startOutreach(c);
+    await approve(c, approvalId);
+    await drainWorker();
+    const r1 = await simulate(c, conversationId, 'We can offer ₹22,000 for 1 Instagram reel.');
+    await approve(c, r1.counterApprovalId);
+    await drainWorker();
+    const yes = await simulate(c, conversationId, 'Agreed, we accept your terms. Deal done.');
+    expect(yes.intent).toBe('acceptance');
+    expect(yes.agreed).toBe(true);
+    const deal = await Deal.findById(dealId).lean();
+    expect(deal.negotiationState).toBe('terms_agreed_subject_to_formalization');
+    expect(deal.acceptedTerms.totalAmountMinor).toBe(3_000_000);
+    expect(yes.replyApprovalId).toBeTruthy();
+  });
+
   it('a failed provider call is never reported as a successful send', async () => {
     const c = await signUp(ctx.app);
     await onboard(c);
     const { approvalId, conversationId } = await startOutreach(c);
     setEmailAdapterForTests({ name: 'failing', mode: 'live', send: async () => { throw new EmailSendError('550 mailbox unavailable', { retryable: false, permanentBounce: true }); }, status: async () => ({ provider: 'failing', mode: 'live', configured: true, healthy: false }) });
     try {
+      // Real sending needs consent given while real sending is on (demo consent doesn't count).
+      await c.post('/integrations/email/connect', { consent: true }).expect(200);
       await approve(c, approvalId);
       await drainWorker();
     } finally {
@@ -230,6 +342,7 @@ describe('mandatory negative tests', () => {
     const { approvalId, conversationId } = await startOutreach(c);
     setEmailAdapterForTests({ name: 'flaky', mode: 'live', send: async () => { throw new EmailSendError('ETIMEDOUT', { retryable: true }); }, status: async () => ({ configured: true }) });
     try {
+      await c.post('/integrations/email/connect', { consent: true }).expect(200);
       await approve(c, approvalId);
       await drainWorker(2);
     } finally {
@@ -255,9 +368,11 @@ describe('mandatory negative tests', () => {
       return request(ctx.app).post('/api/v1/webhooks/email').set('content-type', 'application/json').set('x-creatoros-timestamp', String(ts)).set('x-creatoros-signature', `sha256=${hmac(TEST_ENV.INBOUND_WEBHOOK_SECRET, `${ts}.${payload}`)}`).send(payload);
     };
     expect((await send()).status).toBe(202);
+    await drainWorker(); // classification and offer handling run in the inbound.process job
     const dup = await send();
     expect(dup.status).toBe(200);
     expect(dup.body.duplicate).toBe(true);
+    await drainWorker();
     expect(await Message.countDocuments({ conversationId, direction: 'inbound' })).toBe(1);
     expect((await Deal.findOne({ conversationId }).lean()).offerHistory.filter((o) => o.source === 'brand')).toHaveLength(1);
     // Bad signatures are rejected.

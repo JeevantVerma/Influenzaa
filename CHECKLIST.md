@@ -2,7 +2,7 @@
 
 Legend: ✅ implemented and verified (tests and/or a manual browser walkthrough) · 🟡 implemented, partially verified · ⬜ not started
 
-Last updated: 2026-10-18
+Last updated: 2026-10-19
 
 ## Phase 1 — Foundation
 - ✅ npm workspaces monorepo (`server`, `client`), documented commands
@@ -15,6 +15,8 @@ Last updated: 2026-10-18
 - ✅ CSRF double-submit, secure headers, CORS allowlist, request-size limits, rate limiting
 - ✅ Creator onboarding in 4 steps, saved after each step; account is created at registration
 - ✅ Ownership enforcement on every resource (cross-creator access returns 404; tested)
+- ✅ One open deal per brand enforced by a unique partial index; executor checks the draft before changing deal state (tested)
+- ⬜ MongoDB transactions for multi-step writes (needs a replica set in dev, tests and production)
 - ✅ App shell, navigation, responsive layout, design tokens, light and dark themes, accessible controls
 
 ## Phase 2 — Sponsor discovery
@@ -32,10 +34,21 @@ Last updated: 2026-10-18
 - ✅ Deduplication; no re-notification for unchanged findings; dismissed opportunities stay dismissed (tested)
 - ✅ Opportunities UI: ranking, filters, search, evidence panel, fit explanation, save / dismiss / restore, feedback
 - ✅ Contacts: never fabricated, confidence and verification shown, manual add (private), do-not-contact
+- ✅ Contacts from brands' own websites: robots.txt-honouring crawler (≤8 pages), published emails only with source page, role ranking, automatic for new real brands + "Find on website" button (unit + integration tested; live-tested on real Indian D2C sites; verified in the browser)
+- ✅ Real discovery sources (live-tested): GDELT news + AI brand extraction with verbatim-quote check; Serper search for brand creator programmes; Instagram via Apify (paid partnerships, disclosed collabs/discount codes, niche brand posts); creator-programme detection on brand sites; brand websites confirmed by visiting; per-niche cache
+- ✅ Discovery robustness (2026-10-20): patient GDELT retries with Google News (Serper) as backup, niche rotation across runs, influencer platforms filtered by homepage, new accounts follow platform sources
+- ✅ Live negotiation test with a test brand over real Gmail (2026-10-21): replies stay in one Gmail thread; brand terms carry across emails (per-item rates, fee carry-over); counters acknowledge the brand's offer and only push back on conditions that change money, timing, usage or workload; reply drafts use the creator's profile facts
+- ✅ Multi-round negotiation (2026-10-21): counters come down halfway each round towards the brand's offer or the creator's minimum; a final offer at or above the minimum prepares an acceptance for approval; below it, one last counter at the minimum
+- ✅ Agreement is final (2026-10-22): brand confirmations after agreement get a thank-you draft, never a counter; a brand accepting the creator's counter marks terms agreed; real changes to agreed terms go to the creator with nothing drafted
+- ✅ Instagram DMs (2026-10-22): connect (token or Instagram login), inbox checked every minute, brand DMs become deals and run through the same negotiation, fans ignored and not stored, replies only inside the 24-hour window, DM pitches sent by the creator then taken over; live-tested 2026-10-27 (after publishing the Meta app): DM → deal → counters → acceptance sent through Instagram. Later: webhooks, Meta App Review + Business Verification for other creators
+- ✅ `npm run db:remove-demo` removes all demo data (dry run by default); demo removed from this dev setup
+- ✅ Instagram: scan posts of up to 10 similar creators listed in Settings (paid > disclosed > featured), hashtags as fallback; live-tested
+- ⬜ Remove the `demo` source from real deployments
 
 ## Phase 3 — AI negotiation core
 - ✅ Provider-independent AI layer: Anthropic (official SDK, structured output, refusal fallback, typed errors), dev mock, disabled
-- 🟡 Anthropic provider: implemented to the current SDK docs; not called here (no API key)
+- 🟡 Gemini provider (development alternative, free tier): Interactions REST API per Google's docs, `store: false`, retries on 429/5xx, unit-tested against a fake fetch; **live smoke test passes 12/12** on `gemini-3.5-flash-lite` (classification incl. Hinglish, extraction incl. prompt injection, drafts checked against style rules); prompts tuned from reviewed real output; daily-quota fail-fast
+- 🟡 Anthropic provider: implemented to the current SDK docs; schemas checked against structured-output limits; token usage logged per call; live smoke test ready (`npm run ai:smoke -w server`), not yet run (no API key)
 - ✅ Untrusted-content isolation in prompts; no tools; Zod-validated outputs
 - ✅ Structured offer extraction (mock-tested); manual offer entry when AI is unavailable
 - ✅ Deterministic policy engine: rate card, package discount, rights and exclusivity premiums, barter valuation, payment terms, workload
@@ -49,15 +62,19 @@ Last updated: 2026-10-18
 
 ## Phase 4 — Email and conversations
 - ✅ Email adapter interface: demo (simulated), SMTP (nodemailer), disabled
-- 🟡 SMTP adapter: implemented; not exercised against a real server
+- 🟡 SMTP adapter: implemented; Gmail SMTP and IMAP logins verified (2026-10-20); no real message sent through the app yet
 - ✅ Explicit creator authorisation for sending, with stored consent text; revocable
+- ✅ Consent recorded while sending was simulated doesn't authorise real sending; the creator authorises again once a live provider is configured
 - ✅ Truthful sender identity, AI-assistance disclosure and unsubscribe line on every message
 - ✅ Inbound webhook with HMAC signature and timestamp; dedupe by provider message id (tested)
+- 🟡 Development email via your own Gmail: SMTP send + IMAP reply checker (`+cos-{token}` reply addresses, read-only, starts at now, skips own sent mail); tested with a fake mailbox, not yet with real Gmail
+- ⬜ Production email: per-creator Gmail OAuth (`gmail.send`), reply copies via Cloudflare Email Routing to a CreatorOS domain, Google OAuth verification
+- ✅ Webhook stores and queues only; AI and negotiation steps run in the `inbound.process` job with retry, offer-once guard, and creator review on interruption (tested)
 - ✅ Thread matching by reply token or RFC 5322 headers only, never by brand name (tested)
 - ✅ Bounce handling (global suppression); opt-out and refusal suppression (tested)
 - ✅ Follow-ups: business-day scheduling, max attempts, stop on reply / opt-out / takeover, cancellable, suppression reason recorded
 - ✅ Unified inbox: timeline with draft / queued / sent / simulated / failed labels, notes, human takeover, off-platform marker
-- ✅ Demo-only reply simulator that runs the real inbound pipeline
+- ✅ Demo-only reply simulator that runs the real inbound pipeline (same background job as the webhook; UI polls while analysing; verified in the browser with live Gemini)
 - ✅ Integration status panel (email, AI, worker, sources, WhatsApp/Instagram unavailable)
 
 ## Phase 5 — Campaign operations

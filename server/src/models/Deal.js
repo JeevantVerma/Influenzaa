@@ -57,6 +57,8 @@ const dealSchema = new mongoose.Schema(
             missingTerms: [String],
             ambiguities: [String],
             summary: String,
+            carriedForward: [String], // terms kept from the brand's earlier emails
+            finalOffer: Boolean, // the brand said this offer is final
           },
         },
         { _id: false },
@@ -100,5 +102,7 @@ const dealSchema = new mongoose.Schema(
 
 dealSchema.index({ creatorId: 1, status: 1, updatedAt: -1 });
 dealSchema.index({ creatorId: 1, opportunityId: 1 });
+// One open sponsorship conversation per brand, enforced even under concurrent requests.
+dealSchema.index({ creatorId: 1, brandId: 1 }, { unique: true, partialFilterExpression: { status: 'open' } });
 
 export const Deal = mongoose.models.Deal || mongoose.model('Deal', dealSchema);

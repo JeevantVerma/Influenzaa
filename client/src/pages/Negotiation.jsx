@@ -2,17 +2,11 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useApi, useAction, useTaxonomy } from '../api/hooks.js';
 import { post } from '../api/client.js';
-import { ApprovalCard, ConversationTimeline, PolicyChecks, TermsComparison } from '../components/Negotiation.jsx';
-import { Badge, Button, Card, ConfirmDialog, DemoBadge, EmptyState, ErrorState, Field, LoadingCard, Modal, MoneyInput, Toggle } from '../components/ui.jsx';
-import { NEGOTIATION_LABELS, negotiationTone, money, dateTime, humanize, toMinor } from '../lib/format.js';
+import { ApprovalCard, ConversationTimeline, PolicyChecks, TermsComparison, hasWorkInFlight } from '../components/Negotiation.jsx';
+import { Badge, Button, ConfirmDialog, DemoBadge, Disclosure, ErrorState, Field, LoadingCard, Modal, MoneyInput, PageHead, Section, Toggle } from '../components/ui.jsx';
+import { NEGOTIATION_LABELS, RECOMMENDATION_LABELS, negotiationTone, money, dateTime, deliverablesText, humanize, toMinor } from '../lib/format.js';
 
-const REC = {
-  accept: { tone: 'success', label: 'Accept (with your approval)' },
-  counter: { tone: 'info', label: 'Counter' },
-  clarify: { tone: 'warning', label: 'Ask for clarification' },
-  decline: { tone: 'danger', label: 'Decline' },
-  escalate: { tone: 'warning', label: 'Needs your judgement' },
-};
+const REC = RECOMMENDATION_LABELS;
 
 function ManualOfferForm({ dealId, currency, onDone }) {
   const tax = useTaxonomy();
@@ -101,7 +95,7 @@ function AgreementDialog({ deal, onClose }) {
 export default function NegotiationPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const q = useApi(['negotiation', id], `/negotiations/${id}`, { refetchInterval: (query) => (query.state.data?.messages?.some((m) => ['queued', 'sending'].includes(m.deliveryStatus)) ? 3000 : 20_000) });
+  const q = useApi(['negotiation', id], `/negotiations/${id}`, { refetchInterval: (query) => (hasWorkInFlight(query.state.data?.messages) ? 3000 : 20_000) });
   const [manual, setManual] = useState(false);
   const [agreement, setAgreement] = useState(false);
   const [confirmAccept, setConfirmAccept] = useState(false);
@@ -130,140 +124,174 @@ export default function NegotiationPage() {
   const closed = ['closed', 'declined', 'deal_confirmed'].includes(deal.negotiationState);
   const agreed = ['terms_agreed_subject_to_formalization', 'agreement_pending'].includes(deal.negotiationState);
 
+  const theirFee = deal.currentOffer?.paymentType === 'barter' ? null : deal.currentOffer?.totalAmountMinor;
+  const askFee = proposed?.totalAmountMinor ?? deal.analysis?.benchmarkValueMinor;
+  const otherPending = pendingApprovals.filter((a) => a !== pendingCounter);
+  const actor = { brand: 'Brand', creator: 'You', ai: 'CreatorOS', system: 'CreatorOS', worker: 'CreatorOS' };
+  // Lead with the plain comparison ("…% below your preferred rate"), not the pricing mechanics.
+  const reasoning = deal.analysis?.reasoning || [];
+  const headline = reasoning.find((r) => /below|above|within|matches|meets/i.test(r) && !/^benchmark/i.test(r)) || reasoning.find((r) => !/^benchmark/i.test(r)) || reasoning[0];
+
   return (
-    <div className="stack lg">
-      <div className="page-header">
-        <div>
-          <div className="row wrap">
-            <h1>{brand.name}</h1>
-            <DemoBadge show={deal.isDemo} />
-            <Badge tone={negotiationTone(deal.negotiationState)}>{NEGOTIATION_LABELS[deal.negotiationState]}</Badge>
-            {deal.termsVersion > 0 && <Badge>Offer v{deal.termsVersion}</Badge>}
-          </div>
-          <p>AI negotiation workspace · autonomy Level {boundaries?.negotiationAutonomy?.level ?? 0}{conversation && <> · <Link to={`/inbox?conversation=${conversation._id}`}>Open conversation</Link></>}</p>
-        </div>
-        <div className="btn-group">
-          {!closed && <Button onClick={() => setManual(true)}>Enter offer manually</Button>}
-          {!closed && <Button variant="ghost" onClick={() => setConfirmClose(true)}>Close deal</Button>}
-        </div>
-      </div>
+    <div className="page-stack">
+      <PageHead
+        back={{ to: '/negotiations', label: 'Deals' }}
+        title={brand.name}
+        badges={<><DemoBadge show={deal.isDemo} label="Demo" /><Badge tone={negotiationTone(deal.negotiationState)}>{NEGOTIATION_LABELS[deal.negotiationState]}</Badge></>}
+        subtitle={conversation ? <Link to={`/inbox?conversation=${conversation._id}`}>Open the email conversation</Link> : null}
+        actions={!closed && (
+          <>
+            <Button size="sm" variant="ghost" onClick={() => setManual(true)}>Enter their offer</Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirmClose(true)}>Close deal</Button>
+          </>
+        )}
+      />
 
       {agreed && (
         <div className="callout info">
           <div className="grow">
-            <div className="strong">Terms agreed — subject to a written agreement.</div>
-            <div className="small">Accepted {money(deal.acceptedTerms?.totalAmountMinor, cur)}. Once a contract, PO or written confirmation exists, confirm it to create the campaign.</div>
+            <div className="strong">You've agreed on {money(deal.acceptedTerms?.totalAmountMinor, cur)}, pending a written agreement.</div>
+            <div className="small">Once you have a contract, purchase order or written confirmation, confirm it here to start the campaign.</div>
           </div>
           <div className="btn-group">
-            {deal.negotiationState === 'terms_agreed_subject_to_formalization' && <Button size="sm" onClick={() => pending.mutate()} loading={pending.isPending}>Waiting for agreement</Button>}
-            <Button size="sm" variant="primary" onClick={() => setAgreement(true)}>Confirm agreement…</Button>
+            {deal.negotiationState === 'terms_agreed_subject_to_formalization' && <Button size="sm" onClick={() => pending.mutate()} loading={pending.isPending}>Waiting for it</Button>}
+            <Button size="sm" variant="primary" onClick={() => setAgreement(true)}>I have it…</Button>
           </div>
         </div>
       )}
       {deal.negotiationState === 'deal_confirmed' && (
         <div className="callout info">
-          <span className="grow strong">Deal confirmed {deal.agreementReference?.confirmedAt ? `on ${dateTime(deal.agreementReference.confirmedAt)}` : ''} ({humanize(deal.agreementReference?.kind)}).</span>
-          {campaign ? <Link className="btn sm primary" to={`/campaigns/${campaign._id}`}>Open campaign</Link> : <Button size="sm" variant="primary" loading={convert.isPending} onClick={() => convert.mutate()}>Create campaign</Button>}
+          <span className="grow strong">Deal confirmed{deal.agreementReference?.confirmedAt ? ` on ${dateTime(deal.agreementReference.confirmedAt)}` : ''}.</span>
+          {campaign ? <Link className="btn sm primary" to={`/campaigns/${campaign._id}`}>Open campaign</Link> : <Button size="sm" variant="primary" loading={convert.isPending} onClick={() => convert.mutate()}>Start the campaign</Button>}
         </div>
       )}
 
-      <div className="split">
-        <div className="stack lg">
+      <div className="two-col">
+        <div className="page-stack">
           {!deal.currentOffer ? (
-            <Card title="Offer">
-              <EmptyState title="No offer yet" icon="scale" action={!closed && <Button onClick={() => setManual(true)}>Enter offer manually</Button>}>When the brand replies with terms, CreatorOS extracts them and analyses them against your boundaries.</EmptyState>
-            </Card>
+            <section className="hero-card" aria-label="Offer">
+              <div className="eyebrow">Waiting for an offer</div>
+              <p>When {brand.name} replies with a fee or terms, CreatorOS reads them and checks them against your limits. If they told you on a call or WhatsApp, enter it yourself.</p>
+              {!closed && <div><Button variant="primary" onClick={() => setManual(true)}>Enter their offer</Button></div>}
+            </section>
           ) : (
-            <>
-              <Card title="Offer summary" actions={lastOffer?.extraction?.provider && <span className="tiny faint">Extracted by {lastOffer.extraction.provider === 'mock' ? 'development mock' : lastOffer.extraction.provider}{lastOffer.source === 'manual_entry' ? ' (manual entry)' : ''}</span>}>
-                <div className="stack">
-                  {lastOffer?.extraction?.summary && <p>{lastOffer.extraction.summary}</p>}
-                  {lastOffer?.source === 'manual_entry' && <p className="small muted">Entered manually by you on {dateTime(lastOffer.at)}.</p>}
-                  {lastOffer?.extraction?.missingTerms?.length > 0 && <div className="small"><span className="strong">Missing terms:</span> {lastOffer.extraction.missingTerms.join(', ')}</div>}
-                  {lastOffer?.extraction?.ambiguities?.length > 0 && <div className="callout warning small">{lastOffer.extraction.ambiguities.join(' ')}</div>}
-                  <TermsComparison offer={deal.currentOffer} proposed={proposed} policy={policy} currency={cur} benchmark={deal.analysis?.benchmarkValueMinor} floor={deal.analysis?.floorValueMinor} />
+            <section className={`hero-card ${!closed && !agreed ? 'needs' : ''}`} aria-label="Your decision">
+              <div className="eyebrow">{closed || agreed ? 'Their offer' : 'Your decision'}</div>
+              <div className="figures">
+                <div className="figure theirs">
+                  <div className="eyebrow">They offered</div>
+                  <div className="value">{theirFee != null ? money(theirFee, cur) : 'Products'}</div>
+                  <div className="sub">{deliverablesText(deal.currentOffer.deliverables) || '—'}</div>
                 </div>
-              </Card>
-              <Card
-                title={<div className="row wrap"><h2>Recommendation</h2>{rec && <Badge tone={rec.tone}>{rec.label}</Badge>}{!analysisFresh && <Badge tone="warning">Outdated — re-analyse</Badge>}</div>}
-                actions={<Button size="sm" icon="refresh" onClick={() => analyze.mutate()} loading={analyze.isPending}>Re-analyse</Button>}
-              >
-                {deal.analysis?.checks?.length ? (
-                  <div className="stack">
-                    {deal.analysis.reasoning?.map((r) => <p key={r}>{r}</p>)}
-                    {deal.analysis.tradeoffs?.length > 0 && (
-                      <div className="callout small"><div><div className="strong">Trade-offs</div><ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{deal.analysis.tradeoffs.map((t) => <li key={t}>{t}</li>)}</ul></div></div>
-                    )}
-                    <PolicyChecks checks={deal.analysis.checks} />
-                    <p className="tiny faint">Limits are checked by a deterministic policy engine; the AI only drafts wording. Recommendation recorded {dateTime(deal.analysis.at)}.</p>
-                    {!closed && !agreed && (
-                      <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
-                        <Button variant="danger" onClick={() => setConfirmDecline(true)}>Decline…</Button>
-                        <Button icon="sparkle" onClick={() => counter.mutate()} loading={counter.isPending} disabled={!!pendingCounter}>{pendingCounter ? 'Counter awaiting approval' : 'Generate counteroffer'}</Button>
-                        <Button variant="primary" onClick={() => setConfirmAccept(true)}>Accept offer…</Button>
-                      </div>
-                    )}
+                <div className="figure ask">
+                  <div className="eyebrow">You'd ask</div>
+                  <div className="value">{askFee != null ? money(askFee, cur) : '—'}</div>
+                  <div className="sub">{pendingCounter ? 'in your draft counteroffer' : 'your usual rate for this'}</div>
+                </div>
+                <div className="figure">
+                  <div className="eyebrow">Your minimum</div>
+                  <div className="value">{deal.analysis?.floorValueMinor ? money(deal.analysis.floorValueMinor, cur) : '—'}</div>
+                  <div className="sub">you set this in Settings</div>
+                </div>
+              </div>
+              {lastOffer?.extraction?.summary && <p>{lastOffer.extraction.summary}</p>}
+              {lastOffer?.source === 'manual_entry' && <p className="small muted">You entered this offer on {dateTime(lastOffer.at)}.</p>}
+              {lastOffer?.extraction?.missingTerms?.length > 0 && <p className="small muted">They didn't mention: {lastOffer.extraction.missingTerms.join(', ')}.</p>}
+              {lastOffer?.extraction?.ambiguities?.length > 0 && <div className="callout warning small">{lastOffer.extraction.ambiguities.join(' ')}</div>}
+              {rec && (
+                <div className="callout small">
+                  <div className="grow">
+                    <div className="row wrap"><span className="strong">Our suggestion:</span><Badge tone={rec.tone}>{rec.label}</Badge>{!analysisFresh && <Badge tone="warning">Out of date</Badge>}</div>
+                    {headline && <div style={{ marginTop: 4 }}>{headline}</div>}
                   </div>
-                ) : (
-                  <Button onClick={() => analyze.mutate()} loading={analyze.isPending}>Analyse offer</Button>
-                )}
-              </Card>
-            </>
-          )}
-
-          {pendingApprovals.length > 0 && (
-            <section className="stack">
-              <h2>Pending approvals</h2>
-              {pendingApprovals.map((a) => <ApprovalCard key={`${a._id}:${a.actionHash}`} approval={{ ...a, actionLabel: humanize(a.actionType) }} />)}
+                </div>
+              )}
+              {pendingCounter && (
+                <div className="callout warning small">
+                  <span className="grow">Your counteroffer of <strong>{money(pendingCounter.proposedAction.terms?.totalAmountMinor, cur)}</strong> is drafted and waiting for your OK below.</span>
+                  <a className="btn sm" href={`#approval-${pendingCounter._id}`}>Review it</a>
+                </div>
+              )}
+              {!closed && !agreed && (
+                <div className="action-bar sticky">
+                  <Button variant="ghost" className="danger" onClick={() => setConfirmDecline(true)}>Decline…</Button>
+                  <Button icon="sparkle" onClick={() => counter.mutate()} loading={counter.isPending} disabled={!!pendingCounter}>{pendingCounter ? 'Counter drafted' : 'Ask for more'}</Button>
+                  <Button variant="primary" onClick={() => setConfirmAccept(true)}>Accept…</Button>
+                </div>
+              )}
             </section>
           )}
 
-          <Card title="Conversation history">
+          {deal.currentOffer && (
+            <Section title="Their terms vs. your limits" aside={<Button size="sm" variant="ghost" icon="refresh" onClick={() => analyze.mutate()} loading={analyze.isPending}>Check again</Button>}>
+              <TermsComparison offer={deal.currentOffer} proposed={proposed} policy={policy} currency={cur} benchmark={deal.analysis?.benchmarkValueMinor} floor={deal.analysis?.floorValueMinor} />
+            </Section>
+          )}
+
+          {deal.analysis?.checks?.length > 0 && (
+            <div>
+              <Disclosure title="Checked against your limits" meta={`${deal.analysis.checks.filter((c) => c.status !== 'ok').length} to look at`}>
+                <div className="stack">
+                  {reasoning.filter((r) => r !== headline).map((r) => <p key={r} className="small">{r}</p>)}
+                  {deal.analysis.tradeoffs?.length > 0 && <ul className="reason-list">{deal.analysis.tradeoffs.map((t) => <li key={t}><span className="mark info" aria-hidden="true">i</span><span className="small">{t}</span></li>)}</ul>}
+                  <PolicyChecks checks={deal.analysis.checks} />
+                  <p className="tiny faint">Your limits are checked by fixed rules, not by the AI; the AI only writes the wording. Checked {dateTime(deal.analysis.at)}.</p>
+                </div>
+              </Disclosure>
+            </div>
+          )}
+
+          {(pendingCounter || otherPending.length > 0) && (
+            <section className="stack" aria-label="Waiting for your OK">
+              <div className="panel-title"><h2>Waiting for your OK</h2></div>
+              {[pendingCounter, ...otherPending].filter(Boolean).map((a) => <ApprovalCard key={`${a._id}:${a.actionHash}`} approval={{ ...a, contextSnapshot: { brandName: brand.name, ...a.contextSnapshot } }} defaultOpen={false} />)}
+            </section>
+          )}
+
+          <Section title="Conversation">
             <ConversationTimeline messages={messages} />
-          </Card>
+          </Section>
         </div>
 
-        <div className="stack lg">
-          <Card title="Your deal boundaries" actions={<Link to="/settings?tab=commercial" className="small">Edit</Link>}>
-            <dl className="kv small">
-              {(policy.rates || []).map((r) => (
-                <div key={r.deliverable} style={{ display: 'contents' }}>
-                  <dt>{humanize(r.deliverable)}</dt>
-                  <dd className="num">{money(r.preferredMinor, policy.currency)} <span className="faint">min {money(r.minimumMinor, policy.currency)}</span></dd>
+        <div className="page-stack">
+          <Section title="Your limits" aside={<Link to="/settings?tab=commercial" className="small">Edit</Link>}>
+            {!policy.rates?.length ? (
+              <div className="callout warning small">Add your rates in Settings so offers can be compared.</div>
+            ) : (
+              <dl className="term-list compact">
+                {(policy.rates || []).map((r) => (
+                  <div className="term-row" key={r.deliverable}><dt>{humanize(r.deliverable)}</dt><dd className="num">{money(r.preferredMinor, policy.currency)}<span className="tiny faint" style={{ display: 'block', fontWeight: 500 }}>min {money(r.minimumMinor, policy.currency)}</span></dd></div>
+                ))}
+                <div className="term-row"><dt>Package discount</dt><dd>up to {policy.maxPackageDiscountPercent ?? 0}%</dd></div>
+                <div className="term-row"><dt>Revisions</dt><dd>up to {policy.maxRevisions ?? 2}</dd></div>
+                <div className="term-row"><dt>Products instead of fee</dt><dd>{humanize(boundaries?.barterPolicy?.acceptance)}</dd></div>
+              </dl>
+            )}
+          </Section>
+          <Section title="Offers so far" bodyClass="">
+            {!deal.offerHistory.length ? <p className="panel-empty">No offers yet.</p> : (
+              [...deal.offerHistory].reverse().map((o, i) => (
+                <div key={i} className="row-link">
+                  <span className="grow">
+                    <span className="strong num">{o.terms?.paymentType === 'barter' ? 'Products' : money(o.terms?.totalAmountMinor, cur)}</span>
+                    <span className="small muted">{o.source === 'creator_counter' ? 'Your counteroffer' : o.source === 'manual_entry' ? 'Their offer (entered by you)' : 'Their offer'} · {dateTime(o.at)}</span>
+                  </span>
                 </div>
-              ))}
-              <dt>Package discount</dt><dd>up to {policy.maxPackageDiscountPercent ?? 0}%</dd>
-              <dt>Revisions</dt><dd>{policy.maxRevisions ?? 2}</dd>
-              <dt>Barter</dt><dd>{humanize(boundaries?.barterPolicy?.acceptance)}</dd>
-            </dl>
-            {!policy.rates?.length && <div className="callout warning small">Add your rate card so offers can be benchmarked.</div>}
-          </Card>
-          <Card title="Offer history" bodyClass="">
-            {!deal.offerHistory.length ? <EmptyState title="No offers yet" /> : (
-              <div className="list">
-                {[...deal.offerHistory].reverse().map((o, i) => (
-                  <div key={i} className="list-item small">
-                    <Badge tone={o.source === 'creator_counter' ? 'primary' : ''}>{o.source === 'creator_counter' ? 'Your counter' : o.source === 'manual_entry' ? 'Manual entry' : 'Brand offer'}</Badge>
-                    <span className="grow num">{o.terms?.paymentType === 'barter' ? 'Barter' : money(o.terms?.totalAmountMinor, cur)}</span>
-                    <span className="tiny faint">v{o.version} · {dateTime(o.at)}</span>
+              ))
+            )}
+          </Section>
+          <div>
+            <Disclosure title="Deal timeline" meta={`${deal.stateHistory.length} step${deal.stateHistory.length === 1 ? '' : 's'}`}>
+              <div className="stack sm">
+                {[...deal.stateHistory].reverse().slice(0, 15).map((st, i) => (
+                  <div key={i} className="row top small">
+                    <span className="grow"><span className="strong">{NEGOTIATION_LABELS[st.to] || st.to}</span><span className="muted" style={{ display: 'block' }}>{st.reason}</span></span>
+                    <span className="tiny faint" style={{ textAlign: 'right' }}>{actor[st.actorType] || 'CreatorOS'}<br />{dateTime(st.at)}</span>
                   </div>
                 ))}
               </div>
-            )}
-          </Card>
-          <Card title="State history" bodyClass="">
-            <div className="list">
-              {[...deal.stateHistory].reverse().slice(0, 15).map((s, i) => (
-                <div key={i} className="list-item small" style={{ alignItems: 'flex-start' }}>
-                  <div className="grow">
-                    <div className="strong">{NEGOTIATION_LABELS[s.to] || s.to}</div>
-                    <div className="tiny muted">{s.reason}</div>
-                  </div>
-                  <div className="tiny faint" style={{ textAlign: 'right' }}>{s.actorType}<br />{dateTime(s.at)}</div>
-                </div>
-              ))}
-            </div>
-          </Card>
+            </Disclosure>
+          </div>
         </div>
       </div>
 
@@ -271,15 +299,15 @@ export default function NegotiationPage() {
         <ManualOfferForm dealId={id} currency={cur} onDone={() => setManual(false)} />
       </Modal>
       {agreement && <AgreementDialog deal={deal} onClose={() => setAgreement(false)} />}
-      <ConfirmDialog open={confirmAccept} onClose={() => setConfirmAccept(false)} title="Accept this offer?" confirmLabel="Prepare acceptance" loading={accept.isPending} onConfirm={() => accept.mutate()}>
-        <p>CreatorOS will draft an acceptance (subject to a written agreement) for <strong>{money(deal.currentOffer?.totalAmountMinor, cur)}</strong>. You will see the exact message and approve it explicitly before anything is sent.</p>
-        {deal.analysis?.recommendation !== 'accept' && <div className="callout warning small">The analysis recommends <strong>{deal.analysis?.recommendation}</strong>, not accept. Review the checks first.</div>}
+      <ConfirmDialog open={confirmAccept} onClose={() => setConfirmAccept(false)} title={`Accept ${money(deal.currentOffer?.totalAmountMinor, cur)}?`} confirmLabel="Draft my acceptance" loading={accept.isPending} onConfirm={() => accept.mutate()}>
+        <p>CreatorOS drafts an acceptance email (subject to a written agreement). You'll see the exact email and approve it before anything is sent.</p>
+        {deal.analysis?.recommendation !== 'accept' && <div className="callout warning small">Our suggestion was <strong>{REC[deal.analysis?.recommendation]?.label?.toLowerCase() || deal.analysis?.recommendation}</strong>, not accept. Check the terms first.</div>}
       </ConfirmDialog>
-      <ConfirmDialog open={confirmDecline} onClose={() => setConfirmDecline(false)} title="Decline this offer?" confirmLabel="Draft decline" danger loading={decline.isPending} onConfirm={() => decline.mutate()}>
-        <p>A polite decline will be drafted for your approval.</p>
+      <ConfirmDialog open={confirmDecline} onClose={() => setConfirmDecline(false)} title="Decline this offer?" confirmLabel="Draft a polite no" danger loading={decline.isPending} onConfirm={() => decline.mutate()}>
+        <p>CreatorOS drafts a polite decline. You approve it before it is sent.</p>
       </ConfirmDialog>
       <ConfirmDialog open={confirmClose} onClose={() => setConfirmClose(false)} title="Close this deal?" confirmLabel="Close deal" danger loading={close.isPending} onConfirm={() => close.mutate()}>
-        <p>Pending approvals are cancelled and follow-ups stop. Nothing is sent to the brand.</p>
+        <p>Drafts waiting for your OK are cancelled and follow-ups stop. Nothing is sent to the brand.</p>
       </ConfirmDialog>
     </div>
   );

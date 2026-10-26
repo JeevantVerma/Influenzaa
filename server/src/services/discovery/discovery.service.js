@@ -6,7 +6,7 @@ import { workerHealth } from '../../jobs/health.js';
 import { recordAudit } from '../audit.service.js';
 import { platformSources } from './sources/index.js';
 import { assertPublicUrl } from '../../lib/safeFetch.js';
-import { normalizeDomain } from '../../lib/domain.js';
+import { normalizeDomain, normalizeInstagramHandle } from '../../lib/domain.js';
 
 const MIN = 60_000;
 
@@ -61,6 +61,7 @@ export async function getDiscoveryStatus(creatorId) {
       enabledSources: cfg.sourceConfiguration?.enabledSources || [],
       rssFeeds: cfg.sourceConfiguration?.rssFeeds || [],
       searchQueries: cfg.sourceConfiguration?.searchQueries || [],
+      instagramCreators: cfg.sourceConfiguration?.instagramCreators || [],
     },
     manualRunsRemainingToday: Math.max(0, getConfig().discovery.manualRunsPerDay - recentManualRuns(cfg).length),
     pendingJobs: pendingJobs.map((j) => ({ id: j._id, status: j.status, scheduledAt: j.scheduledAt, trigger: j.payload?.trigger })),
@@ -158,7 +159,7 @@ export async function runDiscoveryNow(creatorId) {
   return getDiscoveryStatus(creatorId);
 }
 
-export async function updateDiscoveryConfig(creatorId, { intervalMinutes, enabledSources, rssFeeds, searchQueries }) {
+export async function updateDiscoveryConfig(creatorId, { intervalMinutes, enabledSources, rssFeeds, searchQueries, instagramCreators }) {
   const cfg = await getConfigDoc(creatorId);
   const { minIntervalMinutes } = getConfig().discovery;
   if (intervalMinutes !== undefined) {
@@ -190,7 +191,16 @@ export async function updateDiscoveryConfig(creatorId, { intervalMinutes, enable
     cfg.sourceConfiguration.rssFeeds = cleaned;
   }
   if (searchQueries !== undefined) cfg.sourceConfiguration.searchQueries = searchQueries;
+  if (instagramCreators !== undefined) {
+    const handles = [];
+    for (const raw of instagramCreators) {
+      const h = normalizeInstagramHandle(raw);
+      if (!h) throw badRequest(`"${raw}" is not an Instagram handle or profile link`);
+      if (!handles.includes(h)) handles.push(h);
+    }
+    cfg.sourceConfiguration.instagramCreators = handles;
+  }
   await cfg.save();
-  await audit(creatorId, 'discovery.config_updated', { intervalMinutes: cfg.intervalMinutes, enabledSources: cfg.sourceConfiguration.enabledSources, feeds: cfg.sourceConfiguration.rssFeeds.length });
+  await audit(creatorId, 'discovery.config_updated', { intervalMinutes: cfg.intervalMinutes, enabledSources: cfg.sourceConfiguration.enabledSources, feeds: cfg.sourceConfiguration.rssFeeds.length, instagramCreators: cfg.sourceConfiguration.instagramCreators?.length || 0 });
   return getDiscoveryStatus(creatorId);
 }

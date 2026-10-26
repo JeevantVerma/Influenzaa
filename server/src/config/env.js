@@ -22,10 +22,13 @@ const schema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
   // AI
-  AI_PROVIDER: z.enum(['auto', 'anthropic', 'mock', 'disabled']).default('auto'),
+  AI_PROVIDER: z.enum(['auto', 'anthropic', 'gemini', 'mock', 'disabled']).default('auto'),
   ANTHROPIC_API_KEY: optionalString,
   ANTHROPIC_MODEL: z.string().default('claude-opus-5-5'),
   ANTHROPIC_EFFORT: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
+  GEMINI_API_KEY: optionalString,
+  GEMINI_MODEL: z.string().default('gemini-3.5-flash-lite'),
+  GEMINI_THINKING_LEVEL: z.enum(['minimal', 'low', 'medium', 'high']).default('medium'),
   AI_TIMEOUT_MS: z.coerce.number().int().positive().default(90_000),
 
   // Email
@@ -39,6 +42,17 @@ const schema = z.object({
   SMTP_USER: optionalString,
   SMTP_PASS: optionalString,
   INBOUND_WEBHOOK_SECRET: optionalString,
+  // Reply address template; {token} identifies the conversation. Example for a
+  // plain Gmail inbox: "you+cos-{token}@gmail.com". Default: reply+{token}@EMAIL_REPLY_TO_DOMAIN.
+  EMAIL_REPLY_TO_ADDRESS: optionalString,
+  // How brand replies reach the app: a signed webhook, or polling an IMAP inbox.
+  INBOUND_PROVIDER: z.enum(['webhook', 'imap', 'none']).default('webhook'),
+  IMAP_HOST: optionalString,
+  IMAP_PORT: z.coerce.number().int().positive().default(993),
+  IMAP_SECURE: bool(true),
+  IMAP_USER: optionalString,
+  IMAP_PASS: optionalString,
+  IMAP_MAILBOX: z.string().default('INBOX'),
 
   // Discovery
   DISCOVERY_SOURCES: z.string().default('demo'),
@@ -47,6 +61,18 @@ const schema = z.object({
   DISCOVERY_MAX_CONCURRENCY: z.coerce.number().int().positive().max(20).default(2),
   DISCOVERY_MANUAL_RUNS_PER_DAY: z.coerce.number().int().positive().default(6),
   BRAVE_SEARCH_API_KEY: optionalString,
+  SERPER_API_KEY: optionalString,
+  APIFY_TOKEN: optionalString,
+  // Hard cap on what one Instagram scrape (Apify run) may cost.
+  APIFY_MAX_USD_PER_RUN: z.coerce.number().positive().max(20).default(0.5),
+
+  // Instagram DMs (official Instagram API with Instagram Login). Without an app id/secret,
+  // creators can still connect by pasting a token generated in the Meta app dashboard.
+  INSTAGRAM_APP_ID: optionalString,
+  INSTAGRAM_APP_SECRET: optionalString,
+  INSTAGRAM_REDIRECT_URI: optionalString, // must be HTTPS and registered in the Meta app
+  INSTAGRAM_API_VERSION: z.string().default('v26.0'),
+  INSTAGRAM_POLL_DMS: bool(true), // check connected inboxes every minute (development; production adds webhooks)
 
   // Worker
   RUN_WORKER_IN_PROCESS: bool(true),
@@ -72,10 +98,14 @@ function buildConfig(raw) {
   let aiProvider = e.AI_PROVIDER;
   if (aiProvider === 'auto') {
     if (e.ANTHROPIC_API_KEY) aiProvider = 'anthropic';
+    else if (e.GEMINI_API_KEY) aiProvider = 'gemini';
     else aiProvider = isProd ? 'disabled' : 'mock';
   }
   if (aiProvider === 'anthropic' && !e.ANTHROPIC_API_KEY) {
     problems.push('AI_PROVIDER=anthropic requires ANTHROPIC_API_KEY');
+  }
+  if (aiProvider === 'gemini' && !e.GEMINI_API_KEY) {
+    problems.push('AI_PROVIDER=gemini requires GEMINI_API_KEY');
   }
   if (aiProvider === 'mock' && isProd) {
     problems.push('AI_PROVIDER=mock is not allowed in production');
@@ -84,6 +114,14 @@ function buildConfig(raw) {
   const demoAllowed = !isProd || e.ALLOW_DEMO_IN_PRODUCTION;
   if (e.EMAIL_PROVIDER === 'demo' && isProd && !e.ALLOW_DEMO_IN_PRODUCTION) {
     problems.push('EMAIL_PROVIDER=demo is not allowed in production (set smtp, disabled, or ALLOW_DEMO_IN_PRODUCTION=true for a staging demo)');
+  }
+  if (e.EMAIL_REPLY_TO_ADDRESS && !/^[^@\s]*\{token\}[^@\s]*@[^@\s]+\.[^@\s]+$/.test(e.EMAIL_REPLY_TO_ADDRESS)) {
+    problems.push('EMAIL_REPLY_TO_ADDRESS must be an address containing {token} before the @, e.g. you+cos-{token}@gmail.com');
+  }
+  if (e.INBOUND_PROVIDER === 'imap') {
+    if (!e.IMAP_HOST) problems.push('INBOUND_PROVIDER=imap requires IMAP_HOST');
+    if (!(e.IMAP_USER || e.SMTP_USER) || !(e.IMAP_PASS || e.SMTP_PASS)) problems.push('INBOUND_PROVIDER=imap requires IMAP_USER and IMAP_PASS (or SMTP_USER and SMTP_PASS)');
+    if (!e.EMAIL_REPLY_TO_ADDRESS) problems.push('INBOUND_PROVIDER=imap requires EMAIL_REPLY_TO_ADDRESS so replies can be matched to conversations');
   }
   if (e.EMAIL_PROVIDER === 'smtp') {
     for (const k of ['SMTP_HOST', 'EMAIL_FROM_ADDRESS']) if (!e[k]) problems.push(`EMAIL_PROVIDER=smtp requires ${k}`);
@@ -94,7 +132,7 @@ function buildConfig(raw) {
 
   const sources = e.DISCOVERY_SOURCES.split(',').map((s) => s.trim()).filter(Boolean);
   for (const s of sources) {
-    if (!['demo', 'rss', 'brave'].includes(s)) problems.push(`Unknown discovery source "${s}"`);
+    if (!['demo', 'rss', 'brave', 'gdelt', 'serper', 'instagram'].includes(s)) problems.push(`Unknown discovery source "${s}"`);
   }
   if (sources.includes('demo') && !demoAllowed) problems.push('The demo discovery source is not allowed in production');
   if (sources.includes('brave') && !e.BRAVE_SEARCH_API_KEY) problems.push('Discovery source "brave" requires BRAVE_SEARCH_API_KEY');
@@ -120,6 +158,7 @@ function buildConfig(raw) {
       model: e.ANTHROPIC_MODEL,
       effort: e.ANTHROPIC_EFFORT,
       timeoutMs: e.AI_TIMEOUT_MS,
+      gemini: { apiKey: e.GEMINI_API_KEY, model: e.GEMINI_MODEL, thinkingLevel: e.GEMINI_THINKING_LEVEL },
     },
     email: {
       provider: e.EMAIL_PROVIDER,
@@ -128,6 +167,11 @@ function buildConfig(raw) {
       replyToDomain: e.EMAIL_REPLY_TO_DOMAIN,
       smtp: { host: e.SMTP_HOST, port: e.SMTP_PORT, secure: e.SMTP_SECURE, user: e.SMTP_USER, pass: e.SMTP_PASS },
       inboundWebhookSecret: e.INBOUND_WEBHOOK_SECRET,
+      replyToAddress: e.EMAIL_REPLY_TO_ADDRESS,
+      inbound: {
+        provider: e.INBOUND_PROVIDER,
+        imap: { host: e.IMAP_HOST, port: e.IMAP_PORT, secure: e.IMAP_SECURE, user: e.IMAP_USER || e.SMTP_USER, pass: e.IMAP_PASS || e.SMTP_PASS, mailbox: e.IMAP_MAILBOX },
+      },
     },
     discovery: {
       sources,
@@ -136,6 +180,18 @@ function buildConfig(raw) {
       maxConcurrency: e.DISCOVERY_MAX_CONCURRENCY,
       manualRunsPerDay: e.DISCOVERY_MANUAL_RUNS_PER_DAY,
       braveApiKey: e.BRAVE_SEARCH_API_KEY,
+      // serper and instagram report "unavailable" at run time when their key is missing.
+      serperApiKey: e.SERPER_API_KEY,
+      apifyToken: e.APIFY_TOKEN,
+      apifyMaxUsdPerRun: e.APIFY_MAX_USD_PER_RUN,
+    },
+    instagram: {
+      appId: e.INSTAGRAM_APP_ID,
+      appSecret: e.INSTAGRAM_APP_SECRET,
+      redirectUri: e.INSTAGRAM_REDIRECT_URI,
+      apiVersion: e.INSTAGRAM_API_VERSION,
+      pollDms: e.INSTAGRAM_POLL_DMS,
+      loginConfigured: !!(e.INSTAGRAM_APP_ID && e.INSTAGRAM_APP_SECRET && e.INSTAGRAM_REDIRECT_URI),
     },
     worker: {
       inProcess: e.RUN_WORKER_IN_PROCESS,

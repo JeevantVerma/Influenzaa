@@ -44,6 +44,11 @@ export async function exportCreatorData(creatorId) {
 export async function deleteAccount(creatorId, password) {
   const user = await User.findById(creatorId).select('+passwordHash');
   if (!user || !(await verifyPassword(password, user.passwordHash))) throw unauthorized('Password is incorrect');
+  await eraseCreator(creatorId);
+}
+
+/** Removes a creator and everything they own (no password check; callers must authorise). */
+export async function eraseCreator(creatorId) {
   const q = { creatorId };
   await Promise.all([
     CreatorProfile.deleteOne({ userId: creatorId }),

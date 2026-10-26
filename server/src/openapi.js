@@ -36,6 +36,7 @@ const ROUTES = [
   R('post', '/opportunities/{id}/draft-pitch', 'Generate a recommended pitch (not sent)', { tag: 'opportunities' }),
   R('post', '/opportunities/{id}/initiate-outreach', 'Create deal + conversation + pitch; routes through approval policy', { tag: 'opportunities' }),
   R('post', '/opportunities/{id}/contacts', 'Add a private contact', { tag: 'contacts' }),
+  R('post', '/opportunities/{id}/find-contacts', "Queue a check of the brand's own website for published business emails", { tag: 'contacts' }),
   R('patch', '/contacts/{id}', 'Correct a contact or mark do-not-contact', { tag: 'contacts' }),
   R('get', '/brands/{id}', 'Brand profile', { tag: 'brands' }),
   R('get', '/conversations', 'Unified inbox list', { tag: 'conversations' }),

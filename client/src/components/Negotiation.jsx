@@ -1,33 +1,47 @@
 import { useState } from 'react';
 import { useAction } from '../api/hooks.js';
 import { post } from '../api/client.js';
-import { Badge, Button, ConfirmDialog, Field, Modal, MoneyInput } from './ui.jsx';
-import { DELIVERY_LABELS, dateTime, deliverablesText, humanize, money, relative, toMajor, toMinor } from '../lib/format.js';
+import { Badge, Button, ConfirmDialog, Disclosure, Field, Icon, Modal, MoneyInput } from './ui.jsx';
+import { APPROVAL_STATUS, APPROVAL_TEXT, CHECK_LABELS, DELIVERY_LABELS, INTENT_LABELS, dateTime, deliverablesText, humanize, money, relative, splitSignature, toMajor, toMinor } from '../lib/format.js';
 
 // ---- Conversation timeline -----------------------------------------------------------
+/** True while a send is in progress or an inbound reply is still being analysed (poll faster). */
+export function hasWorkInFlight(messages = []) {
+  return messages.some((m) => ['queued', 'sending'].includes(m.deliveryStatus) || ['pending', 'processing'].includes(m.inboundProcessing?.status));
+}
+
 export function MessageView({ m }) {
+  const [expanded, setExpanded] = useState(false);
   const d = DELIVERY_LABELS[m.deliveryStatus] || { label: m.deliveryStatus, tone: '' };
-  const cls = m.direction === 'note' ? 'note' : m.deliveryStatus === 'draft' ? 'draft' : m.deliveryStatus === 'failed' ? 'failed' : m.direction;
+  const side = m.direction === 'note' ? 'note' : m.direction === 'inbound' ? 'them' : 'you';
+  const draft = m.deliveryStatus === 'draft';
   const who =
     m.direction === 'inbound' ? m.fromAddress || 'Brand'
       : m.direction === 'note' ? 'Your note'
-        : m.deliveryStatus === 'draft' ? (m.senderType === 'creator' ? 'Your draft' : 'AI draft for you')
-          : 'You, via CreatorOS';
+        : draft ? (m.senderType === 'creator' ? 'Your draft' : 'Draft for you')
+          : 'You';
+  const [body, footer] = m.direction === 'outbound' ? splitSignature(m.content) : [m.content, ''];
+  const long = body.length > 700;
+  const when = m.sentAt || m.receivedAt || m.createdAt;
   return (
-    <article className={`msg ${cls}`} aria-label={`${m.direction} message`}>
-      <div className="msg-head small">
-        <span className="strong">{who}</span>
-        <Badge tone={d.tone}>{d.label}</Badge>
-        {m.provenance === 'simulated' && m.direction === 'inbound' && <Badge tone="demo" title="Injected with the demo simulator; not a real email">Simulated reply</Badge>}
-        {m.aiGenerated && <Badge tone="ai">AI-written · {m.aiProvider}</Badge>}
-        {m.classification?.intent && <Badge tone="info">Intent: {humanize(m.classification.intent)}</Badge>}
-        {m.approvalStatus && !['not_required'].includes(m.approvalStatus) && m.direction === 'outbound' && <span className="tiny faint">approval: {humanize(m.approvalStatus)}</span>}
-        <span className="grow" />
-        <span className="tiny faint" title={dateTime(m.sentAt || m.receivedAt || m.createdAt)}>{relative(m.sentAt || m.receivedAt || m.createdAt)}</span>
+    <article className={`bubble ${side} ${draft ? 'draft' : ''} ${m.deliveryStatus === 'failed' ? 'failed' : ''}`} aria-label={`${who} message`}>
+      <div className="bubble-head">
+        <span className="strong truncate">{who}</span>
+        <span className="tiny faint" title={dateTime(when)}>{relative(when)}</span>
       </div>
-      {m.subject && m.direction !== 'note' && <div className="small strong" style={{ padding: '8px 12px 0' }}>{m.subject}</div>}
-      <div className="msg-body">{m.content}</div>
-      {m.failureReason && m.deliveryStatus === 'failed' && <div className="small" style={{ padding: '0 12px 10px', color: 'var(--danger)' }}>Not sent: {m.failureReason}</div>}
+      <div className="bubble-tags">
+        {m.direction !== 'inbound' && m.direction !== 'note' && <Badge tone={d.tone}>{d.label}</Badge>}
+        {m.provenance === 'simulated' && m.direction === 'inbound' && <Badge tone="demo" title="Injected with the demo simulator; not a real email">Simulated reply</Badge>}
+        {m.aiGenerated && <Badge tone="ai">Written with AI</Badge>}
+        {m.classification?.intent && <Badge tone="info">{INTENT_LABELS[m.classification.intent] || humanize(m.classification.intent)}</Badge>}
+        {['pending', 'processing'].includes(m.inboundProcessing?.status) && <Badge tone="info" title="Reading the reply and checking any offer">Reading reply…</Badge>}
+        {['failed', 'interrupted'].includes(m.inboundProcessing?.status) && <Badge tone="warning" title={m.inboundProcessing.lastError}>Needs your review</Badge>}
+      </div>
+      {m.subject && m.direction !== 'note' && <div className="bubble-subject">{m.subject}</div>}
+      <div className={`bubble-body ${long && !expanded ? 'clamped' : ''}`}>{body}</div>
+      {long && <button type="button" className="link-btn" onClick={() => setExpanded(!expanded)}>{expanded ? 'Show less' : 'Show all'}</button>}
+      {footer && <div className="bubble-footer" title={footer}>{m.channel === 'instagram' ? '+ one-line note that CreatorOS (AI-assisted) helped' : '+ CreatorOS footer (your name, AI note, unsubscribe line)'}</div>}
+      {m.failureReason && m.deliveryStatus === 'failed' && <div className="small" style={{ color: 'var(--danger)', marginTop: 6 }}>Not sent: {m.failureReason}</div>}
     </article>
   );
 }
@@ -52,32 +66,33 @@ function termRows(t, currency) {
   };
 }
 
+/** Their offer next to your counter and your limits. A table on desktop; labelled cards on phones. */
 export function TermsComparison({ offer, proposed, policy, currency = 'INR', benchmark, floor }) {
   const o = termRows(offer, currency);
   const p = termRows(proposed, currency);
   const ur = policy?.usageRights || {};
   const pol = {
-    fee: benchmark ? `Preferred ${money(benchmark, currency)} · floor ${money(floor, currency)}` : 'Set rates in Settings',
-    deliverables: (policy?.acceptedDeliverables || []).length ? `${policy.acceptedDeliverables.length} accepted types` : '—',
+    fee: benchmark ? `You usually ask ${money(benchmark, currency)}; minimum ${money(floor, currency)}` : 'Add your rates in Settings',
+    deliverables: (policy?.acceptedDeliverables || []).length ? `${policy.acceptedDeliverables.length} formats you accept` : '—',
     revisions: `Up to ${policy?.maxRevisions ?? 2}`,
-    usage: `${ur.maxUsageDays ?? 90} days${ur.paidAdsAllowed ? ', paid ads negotiable' : ', no paid ads'}${ur.perpetualAllowed ? '' : ', no perpetual'}`,
-    exclusivity: policy?.exclusivity?.acceptable ? `Up to ${policy.exclusivity.maxDays} days (approval)` : 'Not accepted',
-    payment: `Net ${policy?.paymentTerms?.maxNetDays ?? 30} max`,
+    usage: `${ur.maxUsageDays ?? 90} days${ur.paidAdsAllowed ? ', paid ads negotiable' : ', no paid ads'}${ur.perpetualAllowed ? '' : ', never forever'}`,
+    exclusivity: policy?.exclusivity?.acceptable ? `Up to ${policy.exclusivity.maxDays} days, with your OK` : 'You don\'t accept it',
+    payment: `Within ${policy?.paymentTerms?.maxNetDays ?? 30} days at most`,
   };
-  const rows = [['fee', 'Compensation'], ['deliverables', 'Deliverables'], ['revisions', 'Revisions'], ['usage', 'Usage rights'], ['exclusivity', 'Exclusivity'], ['payment', 'Payment terms']];
+  const rows = [['fee', 'Fee'], ['deliverables', 'What you create'], ['revisions', 'Revisions'], ['usage', 'How they can use it'], ['exclusivity', 'Exclusivity'], ['payment', 'Payment']];
   return (
-    <div className="table-wrap">
-      <table className="table">
+    <div className="compare">
+      <table className="table compare-table">
         <thead>
-          <tr><th>Term</th><th>Brand offer</th>{proposed && <th>Proposed</th>}<th>Your boundaries</th></tr>
+          <tr><th>Term</th><th>They offered</th>{proposed && <th>You'd ask</th>}<th>Your limits</th></tr>
         </thead>
         <tbody>
           {rows.map(([k, label]) => (
             <tr key={k}>
-              <td className="strong">{label}</td>
-              <td className="num">{o[k] ?? '—'}</td>
-              {proposed && <td className="num" style={{ color: p[k] !== o[k] ? 'var(--primary)' : undefined, fontWeight: p[k] !== o[k] ? 600 : undefined }}>{p[k] ?? '—'}</td>}
-              <td className="small muted">{pol[k]}</td>
+              <th scope="row">{label}</th>
+              <td data-label="They offered" className="num">{o[k] ?? '—'}</td>
+              {proposed && <td data-label="You'd ask" className={`num ${p[k] !== o[k] ? 'changed' : ''}`}>{p[k] ?? '—'}</td>}
+              <td data-label="Your limits" className="small muted">{pol[k]}</td>
             </tr>
           ))}
         </tbody>
@@ -87,23 +102,58 @@ export function TermsComparison({ offer, proposed, policy, currency = 'INR', ben
 }
 
 const CHECK_ICON = { ok: '✓', warning: '!', missing: '?', requires_approval: '◆', violation: '✕' };
+/** Each term checked against the creator's limits, in plain words. */
 export function PolicyChecks({ checks = [] }) {
   if (!checks.length) return null;
   return (
-    <div>
+    <ul className="reason-list">
       {checks.map((c) => (
-        <div className="check-row" key={c.code}>
-          <span className={`check-icon ${c.status}`} aria-label={humanize(c.status)}>{CHECK_ICON[c.status] || '·'}</span>
-          <span className="strong small">{c.label}</span>
-          <span className="small">{c.detail} <span className="tiny faint">({humanize(c.status)})</span></span>
-        </div>
+        <li key={c.code}>
+          <span className={`mark ${c.status === 'ok' ? 'good' : c.status === 'violation' ? 'bad' : c.status === 'requires_approval' ? 'info' : 'watch'}`} aria-hidden="true">{CHECK_ICON[c.status] || '·'}</span>
+          <span>
+            <span className="strong">{c.label}</span> <Badge tone={c.status === 'ok' ? 'success' : c.status === 'violation' ? 'danger' : c.status === 'requires_approval' ? 'info' : 'warning'}>{CHECK_LABELS[c.status] || humanize(c.status)}</Badge>
+            <span className="small muted" style={{ display: 'block' }}>{c.detail}</span>
+          </span>
+        </li>
       ))}
+    </ul>
+  );
+}
+
+/** The fee and conditions an action would propose or accept. */
+export function TermsList({ terms: t }) {
+  if (!t) return null;
+  const cur = t.currency || 'INR';
+  return (
+    <dl className="term-list">
+      <div className="term-row"><dt>Fee</dt><dd className="num money-text">{t.paymentType === 'barter' ? 'Products instead of a fee (barter)' : money(t.totalAmountMinor, cur)}</dd></div>
+      <div className="term-row"><dt>What you create</dt><dd>{deliverablesText(t.deliverables) || '—'}</dd></div>
+      <div className="term-row"><dt>Revisions</dt><dd>{t.revisionsIncluded != null ? `Up to ${t.revisionsIncluded} round${t.revisionsIncluded === 1 ? '' : 's'}` : '—'}</dd></div>
+      <div className="term-row"><dt>How they can use it</dt><dd>{t.usageRights?.perpetual ? 'Forever (perpetual)' : t.usageRights?.durationDays != null ? `${t.usageRights.durationDays} days on their channels` : '—'}{t.usageRights?.paidAds ? ', including paid ads' : ''}{t.usageRights?.whitelisting ? ', including ads from your handle' : ''}</dd></div>
+      <div className="term-row"><dt>Exclusivity</dt><dd>{t.exclusivity?.required ? `${t.exclusivity.durationDays} days${t.exclusivity.scope ? ` (${t.exclusivity.scope})` : ''}` : 'None'}</dd></div>
+      <div className="term-row"><dt>Payment</dt><dd>{t.paymentTerms?.netDays != null ? `Within ${t.paymentTerms.netDays} days of your invoice${t.paymentTerms.advancePercent ? `, ${t.paymentTerms.advancePercent}% upfront` : ''}` : '—'}</dd></div>
+    </dl>
+  );
+}
+
+/** An outgoing email as the brand will see it; the footer CreatorOS adds is shown separately. */
+export function EmailPreview({ to, subject, content, draft = true }) {
+  const [body, footer] = splitSignature(content || '');
+  return (
+    <div className={`email-card ${draft ? 'draft' : ''}`}>
+      <div className="email-meta">
+        <span className="muted">To <span className="mono">{(to || []).join(', ')}</span></span>
+        <span className="email-subject">{subject}</span>
+      </div>
+      <div className="email-body">
+        {body}
+        {footer && <div className="email-sig">{footer}</div>}
+      </div>
     </div>
   );
 }
 
 // ---- Approval card ----------------------------------------------------------------------
-const STATUS_TONE = { pending: 'warning', approved: 'info', executed: 'success', rejected: '', expired: '', superseded: '', revoked: '', failed: 'danger' };
 
 export function ApprovalCard({ approval: a, invalidate = [], defaultOpen = true }) {
   const [confirm, setConfirm] = useState(false);
@@ -114,120 +164,110 @@ export function ApprovalCard({ approval: a, invalidate = [], defaultOpen = true 
   const keys = ['approvals', 'dashboard', 'negotiation', 'conversations', 'conversation', ...invalidate];
   const approve = useAction(() => post(`/approvals/${a._id}/approve`, { actionHash: a.actionHash, confirm: a.requiresExplicitConfirmation ? true : undefined }), {
     invalidate: keys,
-    success: a.actionType === 'accept_offer' ? 'Approved. Acceptance queued (subject to written agreement).' : 'Approved and queued',
+    success: a.actionType === 'accept_offer' ? 'Approved. Your acceptance is being sent (subject to a written agreement).' : 'Approved and sending',
     onSuccess: () => setConfirm(false),
   });
-  const reject = useAction(() => post(`/approvals/${a._id}/reject`, { note: note || undefined }), { invalidate: keys, success: 'Rejected — nothing will be sent', onSuccess: () => setRejecting(false) });
+  const reject = useAction(() => post(`/approvals/${a._id}/reject`, { note: note || undefined }), { invalidate: keys, success: 'Turned down. Nothing will be sent.', onSuccess: () => setRejecting(false) });
   const save = useAction(
     () => post(`/approvals/${a._id}/edit`, { subject: edit.subject, content: edit.content, ...(a.proposedAction.terms && edit.amount !== '' ? { totalAmountMinor: toMinor(edit.amount) } : {}) }),
-    { invalidate: keys, success: 'Edit saved. Review and approve the new version.', onSuccess: () => setEditing(false) },
+    { invalidate: keys, success: 'Saved. Check the new version and approve it.', onSuccess: () => setEditing(false) },
   );
-  const revoke = useAction(() => post(`/approvals/${a._id}/revoke`), { invalidate: keys, success: 'Revoked — the message will not be sent' });
+  const revoke = useAction(() => post(`/approvals/${a._id}/revoke`), { invalidate: keys, success: 'Stopped. The message will not be sent.' });
   const pending = a.status === 'pending' && !a.isExpired;
   const t = a.proposedAction.terms;
   const cur = t?.currency || 'INR';
   const [open, setOpen] = useState(defaultOpen);
+  const status = a.isExpired ? APPROVAL_STATUS.expired : APPROVAL_STATUS[a.status] || { label: humanize(a.status), tone: '' };
+  const brand = a.contextSnapshot?.brandName || 'a brand';
+  const attention = (a.policyChecks || []).filter((c) => c.status !== 'ok').length;
 
   return (
-    <article className="card" id={`approval-${a._id}`}>
-      <div className="card-header">
-        <div className="row wrap grow">
-          <h3>{a.actionLabel || humanize(a.actionType)}</h3>
-          {a.contextSnapshot?.brandName && <span className="muted">· {a.contextSnapshot.brandName}</span>}
-          <Badge tone={STATUS_TONE[a.status]}>{a.isExpired ? 'Expired' : humanize(a.status)}</Badge>
-          {a.createdBy === 'system' && <Badge tone="info">Auto-authorised by your rules</Badge>}
-          {a.requiresExplicitConfirmation && pending && <Badge tone="danger">Material commitment</Badge>}
-        </div>
-        <Button size="sm" variant="ghost" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? 'Collapse' : 'Expand'}</Button>
-      </div>
+    <article className={`approval-card ${pending ? 'pending' : ''}`} id={`approval-${a._id}`}>
+      <button type="button" className="approval-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className="todo-icon warning" aria-hidden="true"><Icon name={a.actionType === 'send_pitch' ? 'mail' : 'shield'} size={19} className="" /></span>
+        <span className="grow">
+          <span className="approval-title">{pending ? `${APPROVAL_TEXT[a.actionType] || 'Review a draft for'} ${brand}` : `${a.actionLabel || humanize(a.actionType)} · ${brand}`}</span>
+          <span className="row wrap small muted">
+            {t && t.paymentType !== 'barter' && <span className="money-text strong num">{money(t.totalAmountMinor, cur)}</span>}
+            {pending ? <span>expires {relative(a.expiresAt)}</span> : <Badge tone={status.tone}>{status.label}</Badge>}
+            {a.createdBy === 'system' && <Badge tone="info">Sent under your automation rules</Badge>}
+            {a.requiresExplicitConfirmation && pending && <Badge tone="danger">Binding commitment</Badge>}
+          </span>
+        </span>
+        <Icon name="chevron" size={18} className={`faint disclosure-chevron ${open ? 'open' : ''}`} />
+      </button>
       {open && (
-        <div className="card-body stack">
-          <div>
-            <div className="section-title" style={{ marginBottom: 6 }}>Why approval is required</div>
-            <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
-              {a.reasons.map((r) => <li key={r.code + r.label}>{r.label}</li>)}
-            </ul>
-          </div>
+        <div className="approval-body">
+          {a.executionResult?.error && <div className="callout danger small">This could not be completed: {a.executionResult.error}</div>}
+          {a.executionResult?.deliveryStatus === 'simulated' && <div className="callout demo small">Demo mode: the email was recorded as simulated and not delivered.</div>}
+          {a.proposedAction.content && (
+            <div className="stack sm">
+              <div className="eyebrow">{pending ? 'The email that will be sent' : 'The email'}</div>
+              <EmailPreview to={a.proposedAction.to} subject={a.proposedAction.subject} content={a.proposedAction.content} draft={pending} />
+            </div>
+          )}
           {t && (
-            <div>
-              <div className="section-title" style={{ marginBottom: 6 }}>Terms that will be {a.actionType === 'accept_offer' ? 'accepted' : 'proposed'}</div>
-              <dl className="kv small">
-                <dt>Fee</dt><dd className="num strong">{t.paymentType === 'barter' ? 'Barter' : money(t.totalAmountMinor, cur)}</dd>
-                <dt>Deliverables</dt><dd>{deliverablesText(t.deliverables)}</dd>
-                <dt>Revisions</dt><dd>{t.revisionsIncluded ?? '—'}</dd>
-                <dt>Usage</dt><dd>{t.usageRights?.perpetual ? 'Perpetual' : `${t.usageRights?.durationDays ?? '—'} days`}{t.usageRights?.paidAds ? ' · paid ads' : ''}{t.usageRights?.whitelisting ? ' · whitelisting' : ''}</dd>
-                <dt>Exclusivity</dt><dd>{t.exclusivity?.required ? `${t.exclusivity.durationDays} days` : 'None'}</dd>
-                <dt>Payment</dt><dd>{t.paymentTerms?.netDays != null ? `Net ${t.paymentTerms.netDays}` : '—'}</dd>
-              </dl>
+            <div className="stack sm">
+              <div className="eyebrow">{a.actionType === 'accept_offer' ? "What you're accepting" : "What you're proposing"}</div>
+              <TermsList terms={t} />
               {a.contextSnapshot?.counterRationale?.length > 0 && (
-                <ul className="small muted" style={{ marginTop: 8, paddingLeft: 18 }}>{a.contextSnapshot.counterRationale.map((r) => <li key={r}>{r}</li>)}</ul>
+                <ul className="reason-list">{a.contextSnapshot.counterRationale.map((r) => <li key={r}><span className="mark info" aria-hidden="true">i</span><span className="small">{r}</span></li>)}</ul>
               )}
             </div>
           )}
-          {a.policyChecks?.length > 0 && (
-            <details>
-              <summary className="small strong" style={{ cursor: 'pointer' }}>Policy checks ({a.policyChecks.filter((c) => c.status !== 'ok').length} need attention)</summary>
-              <PolicyChecks checks={a.policyChecks} />
-            </details>
-          )}
-          {a.proposedAction.content && (
-            <div>
-              <div className="section-title" style={{ marginBottom: 6 }}>Exact message that will be sent</div>
-              <div className="msg draft" style={{ maxWidth: 'none' }}>
-                <div className="msg-head small">
-                  <span>To: <span className="mono">{(a.proposedAction.to || []).join(', ')}</span></span>
-                </div>
-                <div className="small strong" style={{ padding: '8px 12px 0' }}>{a.proposedAction.subject}</div>
-                <div className="msg-body">{a.proposedAction.content}</div>
-              </div>
-            </div>
-          )}
-          {a.contextSnapshot?.lastInboundExcerpt && (
-            <details>
-              <summary className="small strong" style={{ cursor: 'pointer' }}>Brand's latest message</summary>
-              <div className="msg inbound small" style={{ marginTop: 8 }}><div className="msg-body">{a.contextSnapshot.lastInboundExcerpt}</div></div>
-            </details>
-          )}
-          <div className="tiny faint">
-            Created {dateTime(a.createdAt)}{pending && ` · expires ${relative(a.expiresAt)}`}{a.reviewedAt && ` · reviewed ${dateTime(a.reviewedAt)}`}{a.executedAt && ` · executed ${dateTime(a.executedAt)}`}
-            {a.editHistory?.length > 0 && ` · edited ${a.editHistory.length}×`} · version <span className="mono">{a.actionHash.slice(0, 10)}</span>
+          <div>
+            <Disclosure title="Why this needs your OK" meta={`${a.reasons.length} reason${a.reasons.length === 1 ? '' : 's'}`}>
+              <ul className="reason-list">{a.reasons.map((r) => <li key={r.code + r.label}><span className="mark info" aria-hidden="true">i</span><span className="small">{r.label}</span></li>)}</ul>
+            </Disclosure>
+            {a.policyChecks?.length > 0 && (
+              <Disclosure title="Checked against your limits" meta={attention ? `${attention} to look at` : 'all fine'}>
+                <PolicyChecks checks={a.policyChecks} />
+              </Disclosure>
+            )}
+            {a.contextSnapshot?.lastInboundExcerpt && (
+              <Disclosure title="The brand's last message">
+                <div className="email-card"><div className="email-body small">{a.contextSnapshot.lastInboundExcerpt}</div></div>
+              </Disclosure>
+            )}
           </div>
-          {a.executionResult?.error && <div className="callout danger small">Execution failed: {a.executionResult.error}</div>}
-          {a.executionResult?.deliveryStatus === 'simulated' && <div className="callout demo small">Executed in demo mode: the message was recorded as simulated and not delivered.</div>}
+          <div className="tiny faint" title={`Version ${a.actionHash}`}>
+            Drafted {dateTime(a.createdAt)}{a.editHistory?.length > 0 && ` · edited ${a.editHistory.length}×`}{a.reviewedAt && ` · reviewed ${dateTime(a.reviewedAt)}`}{a.executedAt && ` · done ${dateTime(a.executedAt)}`}
+          </div>
         </div>
       )}
       {(pending || (a.status === 'approved' && a.executionStatus === 'queued')) && (
-        <div className="card-footer row wrap" style={{ justifyContent: 'flex-end' }}>
+        <div className="action-bar sticky approval-actions">
           {pending ? (
             <>
-              <Button variant="danger" onClick={() => setRejecting(true)}>Reject</Button>
+              <Button variant="ghost" className="danger" onClick={() => setRejecting(true)}>Turn down</Button>
               {a.proposedAction.content && <Button onClick={() => setEditing(true)}>Edit</Button>}
-              <Button variant="primary" icon="check" onClick={() => setConfirm(true)}>Approve…</Button>
+              <Button variant="primary" icon="check" onClick={() => setConfirm(true)}>{a.actionType === 'accept_offer' ? 'Accept…' : 'Approve & send…'}</Button>
             </>
           ) : (
-            <Button variant="danger" loading={revoke.isPending} onClick={() => revoke.mutate()}>Revoke before sending</Button>
+            <Button variant="danger" loading={revoke.isPending} onClick={() => revoke.mutate()}>Stop before it sends</Button>
           )}
         </div>
       )}
       <ConfirmDialog
         open={confirm}
         onClose={() => setConfirm(false)}
-        title={a.actionType === 'accept_offer' ? 'Accept this offer?' : 'Approve this action?'}
+        title={a.actionType === 'accept_offer' ? `Accept ${brand}'s offer?` : `Send this to ${brand}?`}
         confirmLabel={a.actionType === 'accept_offer' ? 'Accept and send' : 'Approve and send'}
         loading={approve.isPending}
         onConfirm={() => approve.mutate()}
-        requireCheck={a.requiresExplicitConfirmation ? 'I confirm I accept these terms, subject to a written agreement.' : undefined}
+        requireCheck={a.requiresExplicitConfirmation ? 'I accept these terms, subject to a written agreement.' : undefined}
       >
-        <p>You are approving exactly the version shown (<span className="mono">{a.actionHash.slice(0, 10)}</span>). If the brand's offer changes before it runs, it will be blocked automatically.</p>
+        <p>You're approving exactly what's shown. If the brand changes their offer before it goes out, it won't be sent.</p>
         {t && <p className="strong">{money(t.totalAmountMinor, cur)} · {deliverablesText(t.deliverables)}</p>}
       </ConfirmDialog>
-      <Modal open={rejecting} onClose={() => setRejecting(false)} title="Reject this proposal" footer={<><Button onClick={() => setRejecting(false)}>Cancel</Button><Button variant="danger solid" loading={reject.isPending} onClick={() => reject.mutate()}>Reject</Button></>}>
-        <Field label="Note (optional)">{(p) => <textarea {...p} className="textarea" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} />}</Field>
+      <Modal open={rejecting} onClose={() => setRejecting(false)} title="Turn this down?" footer={<><Button onClick={() => setRejecting(false)}>Cancel</Button><Button variant="danger solid" loading={reject.isPending} onClick={() => reject.mutate()}>Turn down</Button></>}>
+        <p className="small muted" style={{ marginBottom: 8 }}>Nothing will be sent to the brand.</p>
+        <Field label="Note to yourself (optional)">{(p) => <textarea {...p} className="textarea" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} />}</Field>
       </Modal>
       <Modal wide open={editing} onClose={() => setEditing(false)} title="Edit before approving" footer={<><Button onClick={() => setEditing(false)}>Cancel</Button><Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Save new version</Button></>}>
         <div className="stack">
-          <p className="small muted">Saving creates a new version. You will approve it in a separate step.</p>
-          {t && <Field label="Fee" hint="Edits below your minimum are allowed but flagged.">{(p) => <MoneyInput {...p} currency={cur} value={edit.amount} onChange={(x) => setEdit({ ...edit, amount: x })} />}</Field>}
+          <p className="small muted">Saving creates a new version for you to approve.</p>
+          {t && <Field label="Fee" hint="You can go below your minimum; we'll just flag it.">{(p) => <MoneyInput {...p} currency={cur} value={edit.amount} onChange={(x) => setEdit({ ...edit, amount: x })} />}</Field>}
           <Field label="Subject">{(p) => <input {...p} className="input" value={edit.subject} onChange={(e) => setEdit({ ...edit, subject: e.target.value })} />}</Field>
           <Field label="Message">{(p) => <textarea {...p} className="textarea" rows={12} value={edit.content} onChange={(e) => setEdit({ ...edit, content: e.target.value })} />}</Field>
         </div>

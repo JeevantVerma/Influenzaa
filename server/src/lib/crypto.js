@@ -27,6 +27,28 @@ export async function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(key, expected);
 }
 
+/**
+ * Encrypts a secret (e.g. an integration access token) with AES-256-GCM. The
+ * key is derived from `secret` (the server's AUTH_SECRET); rotating it means
+ * creators reconnect their integrations.
+ */
+export function encryptSecret(plain, secret) {
+  const key = Buffer.from(crypto.hkdfSync('sha256', secret, 'creatoros', 'integration-tokens', 32));
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const data = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
+  return `v1.${iv.toString('base64')}.${cipher.getAuthTag().toString('base64')}.${data.toString('base64')}`;
+}
+
+export function decryptSecret(blob, secret) {
+  const [v, iv, tag, data] = String(blob || '').split('.');
+  if (v !== 'v1' || !iv || !tag || !data) throw new Error('Unreadable secret');
+  const key = Buffer.from(crypto.hkdfSync('sha256', secret, 'creatoros', 'integration-tokens', 32));
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(tag, 'base64'));
+  return Buffer.concat([decipher.update(Buffer.from(data, 'base64')), decipher.final()]).toString('utf8');
+}
+
 export function randomToken(bytes = 32) {
   return crypto.randomBytes(bytes).toString('base64url');
 }

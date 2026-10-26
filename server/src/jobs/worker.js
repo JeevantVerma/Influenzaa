@@ -1,13 +1,14 @@
 import os from 'node:os';
 import crypto from 'node:crypto';
-import { DiscoveryConfiguration, WorkerHeartbeat } from '../models/index.js';
+import { DiscoveryConfiguration, IntegrationConnection, WorkerHeartbeat } from '../models/index.js';
 import { getConfig } from '../config/env.js';
 import { getLogger } from '../lib/logger.js';
 import { claimNextJob, completeJob, failJob, enqueueJob, extendLease } from './queue.js';
 import { HANDLERS } from './handlers.js';
 
 const MIN = 60_000;
-const PER_TYPE_LIMIT = () => ({ 'discovery.run': getConfig().discovery.maxConcurrency });
+// Website contact checks are capped so we never fetch many sites at once.
+const PER_TYPE_LIMIT = () => ({ 'discovery.run': getConfig().discovery.maxConcurrency, 'contacts.discover': 2, 'inbound.imap_poll': 1, 'inbound.instagram_poll': 1 });
 
 /** Enqueue due discovery runs. Conditional update prevents double scheduling across workers. */
 export async function scheduleDueDiscovery(now = new Date(), limit = 50) {
@@ -35,6 +36,17 @@ export async function scheduleMaintenance(now = new Date()) {
   const hour = Math.floor(now.getTime() / (60 * MIN));
   await enqueueJob({ jobType: 'maintenance.approvals', idempotencyKey: `maintenance:approvals:${quarter}`, maxAttempts: 2 });
   await enqueueJob({ jobType: 'maintenance.deadlines', idempotencyKey: `maintenance:deadlines:${hour}`, maxAttempts: 2 });
+  // Check the reply inbox once a minute when replies arrive by IMAP.
+  if (getConfig().email.inbound.provider === 'imap') {
+    await enqueueJob({ jobType: 'inbound.imap_poll', idempotencyKey: `inbound:imap:${Math.floor(now.getTime() / MIN)}`, maxAttempts: 1 });
+  }
+  // Connected Instagram inboxes: new DMs once a minute, token renewal once a day.
+  if (await IntegrationConnection.exists({ provider: 'instagram', status: 'connected' })) {
+    if (getConfig().instagram.pollDms) {
+      await enqueueJob({ jobType: 'inbound.instagram_poll', idempotencyKey: `inbound:instagram:${Math.floor(now.getTime() / MIN)}`, maxAttempts: 1 });
+    }
+    await enqueueJob({ jobType: 'maintenance.instagram_tokens', idempotencyKey: `maintenance:instagram-tokens:${Math.floor(now.getTime() / (24 * 60 * MIN))}`, maxAttempts: 2 });
+  }
 }
 
 export function createWorker({ concurrency = 4, pollMs = getConfig().worker.pollMs, leaseMs = getConfig().worker.leaseMs } = {}) {

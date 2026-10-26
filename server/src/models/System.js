@@ -81,10 +81,25 @@ const integrationConnectionSchema = new mongoose.Schema(
     scopes: [String],
     senderDisplayName: String,
     consent: { text: String, acceptedAt: Date },
-    // Reserved for provider OAuth tokens. Credentials must be stored
-    // encrypted (see README "Integration credentials"); none are stored by the
-    // MVP because email uses the platform-level sender.
+    // Provider access token, AES-GCM encrypted (lib/crypto.js encryptSecret). Never returned by default.
     encryptedCredentialReference: { type: String, default: null, select: false },
+    // Instagram professional account connected for DMs.
+    instagram: {
+      igUserId: String,
+      appScopedId: String,
+      username: String,
+      accountType: String,
+      connectedVia: { type: String, enum: ['login', 'token'] },
+      tokenExpiresAt: Date,
+      tokenRefreshedAt: Date,
+      lastPolledAt: Date,
+      lastSuccessAt: Date,
+      // DMs older than this are never imported (set when the account is connected).
+      importFrom: Date,
+      brandThreads: { type: Number, default: 0 },
+      // Conversations Instagram returned on the last check (0 usually means message access is off).
+      lastConversationCount: Number,
+    },
     connectedAt: Date,
     disconnectedAt: Date,
     lastSuccessfulSyncAt: Date,
@@ -93,6 +108,38 @@ const integrationConnectionSchema = new mongoose.Schema(
   { timestamps: true },
 );
 integrationConnectionSchema.index({ creatorId: 1, provider: 1 }, { unique: true });
+
+// ---- Instagram DM threads seen by the inbox checker --------------------------
+// One row per Instagram conversation. "brand" threads are linked to a
+// CreatorOS conversation; "ignored" threads (fans, friends) keep only the
+// thread id and timestamps, never message content or usernames.
+const instagramThreadSchema = new mongoose.Schema(
+  {
+    creatorId: { type: objectId, ref: 'User', required: true },
+    igConversationId: { type: String, required: true },
+    status: { type: String, enum: ['brand', 'ignored'], required: true },
+    conversationId: { type: objectId, ref: 'Conversation', default: null },
+    lastSeenAt: Date,
+  },
+  { timestamps: true },
+);
+instagramThreadSchema.index({ creatorId: 1, igConversationId: 1 }, { unique: true });
+
+// ---- Inbound mailbox cursor (IMAP polling) -----------------------------------
+// Where the inbox checker stopped, so each message is read once. uidValidity
+// changes if the server renumbers the mailbox; the cursor then restarts at "now".
+const mailboxCursorSchema = new mongoose.Schema(
+  {
+    key: { type: String, required: true, unique: true },
+    uidValidity: String,
+    lastUid: { type: Number, default: 0 },
+    lastPolledAt: Date,
+    lastSuccessAt: Date,
+    lastError: String,
+    matchedTotal: { type: Number, default: 0 },
+  },
+  { timestamps: true },
+);
 
 // ---- Counters (invoice numbers) ----------------------------------------------
 const counterSchema = new mongoose.Schema({
@@ -107,3 +154,5 @@ export const Notification = mongoose.models.Notification || mongoose.model('Noti
 export const IntegrationConnection =
   mongoose.models.IntegrationConnection || mongoose.model('IntegrationConnection', integrationConnectionSchema);
 export const Counter = mongoose.models.Counter || mongoose.model('Counter', counterSchema);
+export const MailboxCursor = mongoose.models.MailboxCursor || mongoose.model('MailboxCursor', mailboxCursorSchema);
+export const InstagramThread = mongoose.models.InstagramThread || mongoose.model('InstagramThread', instagramThreadSchema);

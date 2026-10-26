@@ -17,7 +17,10 @@
     "test": "npm run test -w server && npm run test -w client",
     "lint": "npm run lint -w server && npm run lint -w client",
     "db:init": "npm run db:init -w server",
-    "db:seed-demo": "npm run db:seed-demo -w server"
+    "db:seed-demo": "npm run db:seed-demo -w server",
+    "db:remove-demo": "npm run db:remove-demo -w server --",
+    "db:add-test-brand": "npm run db:add-test-brand -w server --",
+    "db:reset-test-brand": "npm run db:reset-test-brand -w server --"
   },
   "devDependencies": {
     "concurrently": "^10.0.6"

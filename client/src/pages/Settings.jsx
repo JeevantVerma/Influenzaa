@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApi, useAction, useTaxonomy } from '../api/hooks.js';
 import { patch, post, del, get } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { IdentityForm, AudienceForm, CommercialForm } from '../components/ProfileForms.jsx';
-import { AutonomyPanel, EmailAuthorizationPanel, PreferencesForm } from '../components/AutomationPanels.jsx';
+import { AutonomyPanel, EmailAuthorizationPanel, InstagramPanel, PreferencesForm } from '../components/AutomationPanels.jsx';
 import { DiscoveryControl } from '../components/DiscoveryControl.jsx';
 import { Badge, Button, Card, ConfirmDialog, ErrorState, Field, LoadingCard, Tabs } from '../components/ui.jsx';
 import { useToast } from '../components/Toast.jsx';
@@ -24,21 +24,61 @@ const TABS = [
 function DiscoverySources() {
   const q = useApi('discovery', '/discovery/status');
   const [feed, setFeed] = useState({ url: '', brandName: '', brandDomain: '' });
+  const [handleInput, setHandleInput] = useState('');
   const save = useAction((body) => patch('/discovery/config', body), { invalidate: ['discovery'], success: 'Discovery sources updated' });
   if (!q.data) return null;
   const d = q.data;
   const enabled = d.sourceConfiguration.enabledSources.length ? d.sourceConfiguration.enabledSources : d.sources.map((s) => s.id);
   const feeds = d.sourceConfiguration.rssFeeds;
+  const creators = d.sourceConfiguration.instagramCreators || [];
+  const typedHandles = handleInput.split(/[\s,]+/).map((h) => h.trim()).filter(Boolean);
+  const addCreators = () =>
+    save.mutate({ instagramCreators: [...creators, ...typedHandles].slice(0, 10) }, { onSuccess: () => setHandleInput('') });
   return (
     <Card title="Research sources">
       <div className="stack">
-        <p className="small muted">CreatorOS only uses permitted sources: official brand feeds, keyed search APIs, and the clearly labelled demo dataset. It never scrapes logged-in pages or bypasses anti-bot controls.</p>
+        <p className="small muted">
+          Sources: official brand feeds, Indian business news (GDELT), a web search API, brands' own websites, and public Instagram posts collected by Apify, a third-party
+          service. CreatorOS never logs in to any site. Every brand is checked against its own website before it is shown, and the demo dataset is always labelled.
+        </p>
         {d.sources.map((s) => (
           <label key={s.id} className="checkbox">
-            <input type="checkbox" checked={enabled.includes(s.id)} onChange={(e) => save.mutate({ enabledSources: e.target.checked ? [...new Set([...enabled, s.id])] : enabled.filter((x) => x !== s.id) })} />
+            <input type="checkbox" checked={enabled.includes(s.id)} disabled={enabled.length === 1 && enabled.includes(s.id)} onChange={(e) => save.mutate({ enabledSources: e.target.checked ? [...new Set([...enabled, s.id])] : enabled.filter((x) => x !== s.id) })} />
             <span><span className="strong">{s.label}</span> {s.isDemo && <Badge tone="demo">Demo</Badge>}</span>
           </label>
         ))}
+        {d.sources.some((s) => s.id === 'instagram') && (
+          <div className="stack sm">
+            <h3>Creators similar to you</h3>
+            <p className="small muted">
+              Add up to 10 Instagram creators in your niche. CreatorOS checks their recent public posts for paid partnerships and discount codes; brands paying them
+              are your strongest leads. Their names are never shown in your opportunities.
+            </p>
+            {creators.length > 0 && (
+              <div className="chips">
+                {creators.map((h) => (
+                  <span key={h} className="chip" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                    <span className="mono">@{h}</span>
+                    <button type="button" className="btn ghost sm" aria-label={`Remove @${h}`} onClick={() => save.mutate({ instagramCreators: creators.filter((x) => x !== h) })}>×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="row">
+              <input
+                aria-label="Instagram handles"
+                className="input grow"
+                placeholder="@creator or instagram.com/creator (separate several with commas)"
+                value={handleInput}
+                disabled={creators.length >= 10}
+                onChange={(e) => setHandleInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && typedHandles.length) addCreators(); }}
+              />
+              <Button size="sm" disabled={!typedHandles.length || creators.length >= 10} loading={save.isPending} onClick={addCreators}>Add</Button>
+            </div>
+            <p className="tiny faint">{creators.length}/10 added{creators.length === 0 ? ' · until you add some, Instagram scans niche hashtags, which rarely show paid partnerships' : ''}</p>
+          </div>
+        )}
         {d.sources.some((s) => s.id === 'rss') && (
           <div className="stack sm">
             <h3>Brand newsroom feeds</h3>
@@ -64,6 +104,14 @@ function DiscoverySources() {
 
 function Integrations() {
   const q = useApi('integrations', '/integrations');
+  const toast = useToast();
+  const [params, setParams] = useSearchParams();
+  const igResult = params.get('instagram');
+  useEffect(() => {
+    if (!igResult) return;
+    toast(igResult === 'connected' ? 'Instagram connected' : params.get('message') || 'Instagram was not connected', igResult === 'connected' ? 'success' : 'error');
+    setParams((p) => { p.delete('instagram'); p.delete('message'); return p; }, { replace: true });
+  }, [igResult]); // eslint-disable-line react-hooks/exhaustive-deps
   if (q.isLoading) return <LoadingCard />;
   if (q.error) return <ErrorState error={q.error} onRetry={q.refetch} />;
   const i = q.data;
@@ -76,13 +124,13 @@ function Integrations() {
   return (
     <div className="stack lg">
       <EmailAuthorizationPanel />
+      <InstagramPanel />
       <Card title="Integration status" bodyClass="">
         <div className="list">
           {row(`AI provider${i.ai.model ? ` · ${i.ai.model}` : ''}`, i.ai.status, i.ai.detail, { connected: 'success', demo: 'demo', degraded: 'warning', disconnected: '' }[i.ai.status])}
           {row('Background worker', i.worker.healthy ? 'healthy' : 'offline', i.worker.healthy ? `${i.worker.activeWorkers} worker(s), last heartbeat ${dateTime(i.worker.lastHeartbeatAt)}` : 'No recent heartbeat. Scheduled discovery, sending and follow-ups are paused until a worker runs.', i.worker.healthy ? 'success' : 'danger')}
           {row('Discovery sources', `${i.discoverySources.length} available`, i.discoverySources.map((s) => s.label).join(' · '), 'info')}
           {row('WhatsApp Business', 'unavailable', i.whatsapp.detail, '')}
-          {row('Instagram messaging', 'unavailable', i.instagram.detail, '')}
         </div>
       </Card>
     </div>
@@ -181,7 +229,7 @@ export default function SettingsPage() {
               <Card title="Follow-ups, approvals & notifications"><PreferencesForm key={profile.dataUpdatedAt} profile={profile.data} onSave={(b) => save.mutate(b)} saving={save.isPending} /></Card>
             </div>
           )}
-          {tab === 'discovery' && <div className="stack lg"><DiscoveryControl /><DiscoverySources /></div>}
+          {tab === 'discovery' && <div className="stack lg"><DiscoveryControl defaultOpen /><DiscoverySources /></div>}
           {tab === 'integrations' && <Integrations />}
           {tab === 'privacy' && <Privacy />}
         </>

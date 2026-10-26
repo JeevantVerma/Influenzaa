@@ -7,11 +7,11 @@ import { Icon, Button } from './ui.jsx';
 import { NotificationsButton } from './Notifications.jsx';
 
 const NAV = [
-  { to: '/dashboard', label: 'Creator HQ', icon: 'home' },
-  { to: '/opportunities', label: 'Sponsor discovery', icon: 'search' },
-  { to: '/inbox', label: 'Inbox', icon: 'inbox' },
-  { to: '/negotiations', label: 'Negotiations', icon: 'scale' },
-  { to: '/approvals', label: 'Approvals', icon: 'shield', countKey: 'approvals' },
+  { to: '/dashboard', label: 'Home', icon: 'home', tab: true },
+  { to: '/opportunities', label: 'Find sponsors', short: 'Sponsors', icon: 'search', tab: true },
+  { to: '/inbox', label: 'Inbox', icon: 'inbox', tab: true },
+  { to: '/negotiations', label: 'Deals', icon: 'scale', tab: true },
+  { to: '/approvals', label: 'Approvals', icon: 'shield', countKey: 'approvals', tab: true },
   { to: '/campaigns', label: 'Campaigns', icon: 'briefcase' },
   { to: '/activity', label: 'Activity', icon: 'activity' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
@@ -31,6 +31,7 @@ export function AppShell() {
     },
   });
   const counts = { approvals: approvals.data?.total || 0 };
+  const isActive = (to, active) => active || (to !== '/dashboard' && location.pathname.startsWith(to));
   const demo = integrations.data?.email?.mode === 'demo' || integrations.data?.ai?.provider === 'mock';
 
   return (
@@ -42,7 +43,7 @@ export function AppShell() {
         </div>
         <nav className="nav" onClick={() => setOpen(false)}>
           {NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} className={({ isActive }) => (isActive || (n.to === '/negotiations' && location.pathname.startsWith('/negotiations')) ? 'active' : '')}>
+            <NavLink key={n.to} to={n.to} className={({ isActive: active }) => (isActive(n.to, active) ? 'active' : '')}>
               <Icon name={n.icon} />
               {n.label}
               {n.countKey && counts[n.countKey] > 0 && <span className="count" aria-label={`${counts[n.countKey]} pending`}>{counts[n.countKey]}</span>}
@@ -69,9 +70,10 @@ export function AppShell() {
       {open && <div className="scrim" onClick={() => setOpen(false)} aria-hidden="true" />}
       <div className="main">
         <header className="topbar">
-          <Button variant="ghost" className="icon menu-btn" aria-label="Open navigation" onClick={() => setOpen(true)}>
+          <Button variant="ghost" className="icon menu-btn" aria-label="Open menu" onClick={() => setOpen(true)}>
             <Icon name="menu" className="" />
           </Button>
+          <span className="topbar-brand" aria-hidden="true"><span className="logo">C</span>CreatorOS</span>
           <div className="grow" />
           <NotificationsButton />
         </header>
@@ -79,6 +81,15 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+      <nav className="bottom-nav" aria-label="Main">
+        {NAV.filter((n) => n.tab).map((n) => (
+          <NavLink key={n.to} to={n.to} className={({ isActive: active }) => (isActive(n.to, active) ? 'active' : '')}>
+            <Icon name={n.icon} size={22} className="" />
+            <span>{n.short || n.label}</span>
+            {n.countKey && counts[n.countKey] > 0 && <span className="count" aria-label={`${counts[n.countKey]} pending`}>{counts[n.countKey]}</span>}
+          </NavLink>
+        ))}
+      </nav>
     </div>
   );
 }

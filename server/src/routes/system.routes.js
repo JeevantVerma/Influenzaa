@@ -4,13 +4,13 @@ import { isDatabaseReady } from '../db/connect.js';
 import { workerHealth, jobStats } from '../jobs/health.js';
 import { getConfig } from '../config/env.js';
 import { hmac, safeEqual } from '../lib/crypto.js';
-import { processInbound } from '../services/negotiation/negotiation.service.js';
+import { receiveInbound, queueInboundProcessing } from '../services/negotiation/negotiation.service.js';
 import { recordBounce } from '../services/messaging.service.js';
 import { DevOutboxEmail } from '../services/email/index.js';
 import { Message, DiscoveryConfiguration, User } from '../models/index.js';
 import { recordAudit } from '../services/audit.service.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { aiStatus } from '../services/ai/index.js';
+import { aiStatus, aiUsageTotals } from '../services/ai/index.js';
 import { z } from 'zod';
 
 export const healthRouter = Router();
@@ -71,7 +71,7 @@ webhookRouter.post('/email', express.raw({ type: 'application/json', limit: '1mb
     }
     return res.json({ received: true });
   }
-  const result = await processInbound({
+  const result = await receiveInbound({
     provider: 'email',
     externalMessageId: payload.messageId,
     fromAddress: payload.from,
@@ -82,6 +82,8 @@ webhookRouter.post('/email', express.raw({ type: 'application/json', limit: '1mb
     references: payload.references,
     receivedAt: payload.receivedAt || new Date(),
   });
+  // AI and negotiation steps run in the worker so the provider gets a fast answer.
+  await queueInboundProcessing(result);
   res.status(result.duplicate ? 200 : 202).json({ received: true, duplicate: !!result.duplicate, matched: result.matched !== false });
 });
 
@@ -103,5 +105,5 @@ adminRouter.get('/metrics', async (req, res) => {
     User.countDocuments({ role: 'creator' }),
   ]);
   await recordAudit({ actorType: 'admin', actorId: req.user._id, eventType: 'admin.metrics_viewed', resourceType: 'platform' });
-  res.json({ jobs, worker, discoveryStates: discovery.map((d) => ({ status: d._id, count: d.n })), creators, ai: aiStatus() });
+  res.json({ jobs, worker, discoveryStates: discovery.map((d) => ({ status: d._id, count: d.n })), creators, ai: aiStatus(), aiUsage: aiUsageTotals() });
 });

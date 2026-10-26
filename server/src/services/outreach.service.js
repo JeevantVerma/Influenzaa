@@ -59,15 +59,23 @@ export async function initiateOutreach(creatorId, opportunityId, { contactId, su
     BrandProfile.findById(opp.brandId).lean(),
   ]);
   const creatorName = profile?.publicName || user.name;
-  const deal = await Deal.create({
-    creatorId,
-    brandId: opp.brandId,
-    opportunityId: opp._id,
-    currency: profile?.commercialPolicy?.currency || 'INR',
-    negotiationState: 'initial_outreach',
-    stateHistory: [{ from: null, to: 'initial_outreach', at: new Date(), actorType: 'creator', reason: 'Outreach initiated' }],
-    isDemo: opp.isDemo,
-  });
+  let deal;
+  try {
+    deal = await Deal.create({
+      creatorId,
+      brandId: opp.brandId,
+      opportunityId: opp._id,
+      currency: profile?.commercialPolicy?.currency || 'INR',
+      negotiationState: 'initial_outreach',
+      stateHistory: [{ from: null, to: 'initial_outreach', at: new Date(), actorType: 'creator', reason: 'Outreach initiated' }],
+      isDemo: opp.isDemo,
+    });
+  } catch (err) {
+    // A concurrent request opened a deal with this brand first.
+    if (err.code !== 11000) throw err;
+    const raced = await Deal.findOne({ creatorId, brandId: opp.brandId, status: 'open' }, { _id: 1 }).lean();
+    throw conflict('You already have an open conversation with this brand', { dealId: raced?._id });
+  }
   const conversation = await Conversation.create({
     creatorId,
     brandId: opp.brandId,

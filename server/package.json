@@ -10,10 +10,15 @@
     "worker": "node --env-file-if-exists=.env src/worker.js",
     "db:init": "node --env-file-if-exists=.env scripts/init-db.js",
     "db:seed-demo": "node --env-file-if-exists=.env scripts/seed-demo.js",
+    "db:remove-demo": "node --env-file-if-exists=.env scripts/remove-demo.js",
+    "db:add-test-brand": "node --env-file-if-exists=.env scripts/add-test-brand.js",
+    "db:reset-test-brand": "node --env-file-if-exists=.env scripts/reset-test-brand.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src test scripts",
-    "create-admin": "node --env-file-if-exists=.env scripts/create-admin.js"
+    "create-admin": "node --env-file-if-exists=.env scripts/create-admin.js",
+    "ai:smoke": "LOG_LEVEL=warn node --env-file-if-exists=.env scripts/ai-smoke.js",
+    "discovery:smoke": "LOG_LEVEL=warn node --env-file-if-exists=.env scripts/discovery-smoke.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
@@ -23,6 +28,8 @@
     "express-rate-limit": "^8.7.1",
     "fast-xml-parser": "^5.11.2",
     "helmet": "^8.3.0",
+    "imapflow": "^2.5.7",
+    "mailparser": "^3.9.47",
     "mongoose": "^9.11.2",
     "nodemailer": "^10.1.2",
     "pino": "^10.4.0",

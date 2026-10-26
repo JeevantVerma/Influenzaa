@@ -16,7 +16,8 @@ const conversationSchema = new mongoose.Schema(
     subject: String,
     participants: [
       new mongoose.Schema(
-        { name: String, email: String, role: String, side: { type: String, enum: ['creator', 'brand'] } },
+        // Instagram: instagramId is the brand's Instagram-scoped id (IGSID) used to reply; username is its handle.
+        { name: String, email: String, role: String, side: { type: String, enum: ['creator', 'brand'] }, instagramId: String, username: String },
         { _id: false },
       ),
     ],

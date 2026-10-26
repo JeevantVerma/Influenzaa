@@ -7,6 +7,7 @@ import { SIGNAL_KINDS } from './taxonomy.js';
 import { resolveSources } from './sources/index.js';
 import { notify } from '../notification.service.js';
 import { recordAudit } from '../audit.service.js';
+import { programmeEvidence, queueContactDiscovery, shouldCheckContacts } from '../contacts/contactDiscovery.service.js';
 
 const INTENT_RANK = { low_intent: 1, medium_intent: 2, high_intent: 3 };
 const NOTIFY_MIN_SCORE = 40;
@@ -48,6 +49,8 @@ async function upsertBrand(candidate, now) {
   if (candidate.brand.industry) brand.industry = candidate.brand.industry;
   if (candidate.brand.description) brand.brandDescription = candidate.brand.description;
   if (candidate.brand.website) brand.officialWebsite = candidate.brand.website;
+  if (candidate.brand.instagramHandle && !brand.instagramHandle) brand.instagramHandle = candidate.brand.instagramHandle;
+  if (candidate.brand.creatorProgramme?.url && !brand.creatorProgramme?.url) brand.creatorProgramme = candidate.brand.creatorProgramme;
   brand.categories = [...new Set([...(brand.categories || []), ...(candidate.brand.categories || [])])];
   brand.markets = [...new Set([...(brand.markets || []), ...(candidate.brand.markets || [])])];
   if (candidate.signal.productOrCampaign && !brand.products.some((p) => p.name === candidate.signal.productOrCampaign)) {
@@ -164,15 +167,20 @@ export async function runDiscovery({ creatorId, trigger, jobId, now = new Date()
     run.sourcesQueried.push({ source: source.id, status: result.status, itemCount: result.candidates.length, message: result.message });
     if (result.status === 'error' || result.status === 'unavailable') run.runErrors.push(`${source.label}: ${result.message || result.status}`);
 
-    for (const candidate of result.candidates) {
+    for (let candidate of result.candidates) {
       stats.candidatesFound++;
       try {
         const brand = await upsertBrand(candidate, now);
         if (!brand) continue;
         await upsertContacts(brand, candidate.contacts || [], now);
+        // Real brands get a background check of their own website for published contacts.
+        if (shouldCheckContacts(brand, now)) await queueContactDiscovery(brand, { now });
         const dedupeKey = dedupeKeyFor(brand.normalizedDomain, candidate.signal);
         const contactConfidence = await bestContactConfidence(brand._id, creatorId);
-        const intent = (SIGNAL_KINDS[candidate.signal.kind] || SIGNAL_KINDS.category_match).intent;
+        // A creator programme on the brand's own site keeps every opportunity for it high intent.
+        const hasProgramme = !!brand.creatorProgramme?.url;
+        if (hasProgramme) candidate = { ...candidate, evidence: [programmeEvidence(brand, now), ...candidate.evidence] };
+        const intent = hasProgramme ? 'high_intent' : (SIGNAL_KINDS[candidate.signal.kind] || SIGNAL_KINDS.category_match).intent;
         const existing = await Opportunity.findOne({ creatorId, dedupeKey });
         const evidence = mergeEvidence(existing?.sourceEvidence, candidate.evidence);
         const score = scoreOpportunity({
@@ -195,7 +203,9 @@ export async function runDiscovery({ creatorId, trigger, jobId, now = new Date()
           productOrCampaign: candidate.signal.productOrCampaign || null,
           categories: brand.categories,
           sourceEvidence: evidence.merged,
-          rationale: buildRationale(candidate, score),
+          rationale: hasProgramme
+            ? [{ kind: 'fact', text: `Runs a creator programme on its own website: "${brand.creatorProgramme.title || 'Creator programme'}".` }, ...buildRationale(candidate, score)]
+            : buildRationale(candidate, score),
           outreachAngle: outreachAngle(candidate, profile),
           recommendedAction: score.excluded ? 'none_excluded' : alreadyInConversation ? 'continue_existing_conversation' : contactConfidence > 0 ? 'draft_pitch' : 'find_or_add_contact',
           fitScore: score.fitScore,

@@ -74,11 +74,71 @@ export function rightsPremiumPercent(terms, policy) {
 
 const check = (code, label, status, detail) => ({ code, label, status, detail });
 
+/** The creator's lowest acceptable fee for this scope (rate-card floors or the minimum deal size). */
+export function minimumFor(scope, policy) {
+  return Math.max(scope.floor || 0, policy.minimumDealMinor || 0);
+}
+
+/**
+ * Counter amount for this round. The first counter anchors at the creator's
+ * preferred rate. Each later counter comes down halfway from the last one
+ * towards the brand's offer (or the creator's minimum, if the offer is below
+ * it), rounded to ₹500, and never goes below either.
+ */
+export function counterAmount({ target, offered = 0, minimum = 0, lastCounterMinor = null }) {
+  if (lastCounterMinor == null) return Math.max(target, offered);
+  const base = Math.max(minimum, offered);
+  if (lastCounterMinor <= base) return base;
+  const next = roundToNearest(Math.round(base + (lastCounterMinor - base) / 2), 50_000);
+  return next < lastCounterMinor && next > base ? next : base;
+}
+
+/** What the negotiation so far means for the next step: our last counter and whether the brand called its offer final. */
+export function negotiationContext(deal) {
+  const history = deal?.offerHistory || [];
+  const lastCounter = [...history].reverse().find((o) => o.source === 'creator_counter');
+  const lastBrand = [...history].reverse().find((o) => o.source === 'brand');
+  return { lastCounterMinor: lastCounter?.terms?.totalAmountMinor ?? null, brandFinal: !!lastBrand?.extraction?.finalOffer };
+}
+
+/**
+ * Terms for an acceptance: the brand's terms as stated, with anything they left
+ * unstated filled from the creator's defaults so the acceptance is complete.
+ */
+export function fillUnstatedTerms(terms, profile) {
+  const policy = profile.commercialPolicy || {};
+  const ur = policy.usageRights || {};
+  const t = JSON.parse(JSON.stringify(terms));
+  const filled = [];
+  t.usageRights = t.usageRights || {};
+  if (t.usageRights.durationDays == null && !t.usageRights.perpetual) {
+    t.usageRights.durationDays = ur.maxUsageDays ?? 90;
+    t.usageRights.paidAds = t.usageRights.paidAds ?? false;
+    t.usageRights.whitelisting = t.usageRights.whitelisting ?? false;
+    filled.push('usage rights');
+  }
+  if (t.revisionsIncluded == null) {
+    t.revisionsIncluded = policy.maxRevisions ?? 2;
+    filled.push('revisions');
+  }
+  t.paymentTerms = t.paymentTerms || {};
+  if (t.paymentTerms.netDays == null) {
+    t.paymentTerms.netDays = policy.paymentTerms?.maxNetDays ?? 30;
+    filled.push('payment terms');
+  }
+  t.exclusivity = t.exclusivity || {};
+  if (t.exclusivity.required == null) {
+    t.exclusivity.required = false;
+    filled.push('exclusivity');
+  }
+  return { terms: t, filled };
+}
+
 /**
  * Evaluates an offer against the creator's policy.
  * @returns {{ checks, approvalCategories, recommendation, reasoning, tradeoffs, offerValueMinor, benchmarkValueMinor, floorValueMinor, questions }}
  */
-export function evaluateOffer(terms, profile, { activeCampaigns = 0, now = new Date() } = {}) {
+export function evaluateOffer(terms, profile, { activeCampaigns = 0, now = new Date(), negotiation = {} } = {}) {
   const policy = profile.commercialPolicy || {};
   const barter = profile.barterPolicy || {};
   const currency = policy.currency || 'INR';
@@ -236,6 +296,22 @@ export function evaluateOffer(terms, profile, { activeCampaigns = 0, now = new D
   } else if (criticalMissing) {
     recommendation = 'clarify';
     reasoning.push('Key terms are missing, so the offer cannot be evaluated yet.');
+  } else if (!isBarter && cash !== null && negotiation.brandFinal) {
+    const minimum = minimumFor(scope, policy);
+    if (cash >= minimum) {
+      recommendation = 'accept';
+      reasoning.push(`The brand says ${fmt(cash)} is its final offer. It meets your minimum${minimum ? ` of ${fmt(minimum)}` : ''}, and countering again risks losing the deal.`);
+    } else if (negotiation.lastCounterMinor != null && negotiation.lastCounterMinor <= minimum) {
+      recommendation = 'decline';
+      reasoning.push(`The brand's final offer of ${fmt(cash)} is below your minimum of ${fmt(minimum)}, which you have already offered.`);
+    } else {
+      recommendation = 'counter';
+      reasoning.push(`The brand's final offer of ${fmt(cash)} is below your minimum of ${fmt(minimum)}; one last counter at your minimum is suggested.`);
+    }
+  } else if (!isBarter && cash !== null && negotiation.lastCounterMinor != null && cash >= minimumFor(scope, policy)
+    && counterAmount({ target: benchmark, offered: cash, minimum: minimumFor(scope, policy), lastCounterMinor: negotiation.lastCounterMinor }) <= cash) {
+    recommendation = 'accept';
+    reasoning.push(`You have met in the middle: ${fmt(cash)} is at or above where your next counter would land, and above your minimum.`);
   } else if (checks.some((c) => c.code === 'other_conditions')) {
     recommendation = 'escalate';
     reasoning.push('The offer contains conditions that need your judgement before any response.');
@@ -271,7 +347,7 @@ export function evaluateOffer(terms, profile, { activeCampaigns = 0, now = new D
  * rights premiums) — never the minimum — and never asks for less than the
  * brand already offered.
  */
-export function buildCounterTerms(offer, profile, _evaluation) {
+export function buildCounterTerms(offer, profile, _evaluation, { lastCounterMinor = null, brandFinal = false } = {}) {
   const policy = profile.commercialPolicy || {};
   const ur = policy.usageRights || {};
   const rationale = [];
@@ -310,10 +386,16 @@ export function buildCounterTerms(offer, profile, _evaluation) {
   const premium = rightsPremiumPercent(counterTermsBase, policy);
   const target = roundToNearest(Math.round(scope.preferred * (1 + premium.pct / 100)), 50_000);
   const offered = offer.totalAmountMinor ?? 0;
-  let amount = Math.max(target, offered);
+  const minimum = minimumFor(scope, policy);
+  // A brand's final offer below the minimum gets one last counter at the minimum.
+  let amount = brandFinal && lastCounterMinor != null && offered < minimum ? minimum : counterAmount({ target, offered, minimum, lastCounterMinor });
+  let previousCounterMinor = null;
   if (offer.paymentType === 'barter') {
     amount = target;
     rationale.push('Proposed a paid fee instead of barter, as barter-only does not meet your policy.');
+  } else if (lastCounterMinor != null && amount < lastCounterMinor) {
+    previousCounterMinor = lastCounterMinor;
+    rationale.push(amount === Math.max(minimum, offered) && amount === minimum ? 'Came down to your minimum for this scope.' : 'Came down halfway from your last counter towards their offer.');
   } else if (target > offered) {
     rationale.push(`Countered at your preferred rate${premium.notes.length ? ` including ${premium.notes.join(', ')}` : ''}.`);
   } else {
@@ -342,7 +424,7 @@ export function buildCounterTerms(offer, profile, _evaluation) {
     cancellation: offer.cancellation || {},
     otherConditions: [],
   };
-  return { terms, rationale, targetMinor: target, scope };
+  return { terms, rationale, targetMinor: target, scope, previousCounterMinor };
 }
 
 /**

@@ -113,9 +113,10 @@ export const autonomySchema = z
 export const discoveryConfigSchema = z
   .object({
     intervalMinutes: z.number().int().min(1).max(60 * 24 * 30),
-    enabledSources: z.array(z.enum(['demo', 'rss', 'brave'])).max(3),
+    enabledSources: z.array(z.enum(['demo', 'rss', 'brave', 'gdelt', 'serper', 'instagram'])).min(1, 'Keep at least one source on').max(6),
     rssFeeds: z.array(z.object({ url, brandName: s(120).optional(), brandDomain: s(253).optional(), categories: z.array(z.enum(BRAND_CATEGORIES)).max(5).optional() })).max(10),
     searchQueries: strList(3, 120),
+    instagramCreators: z.array(z.string().trim().min(1).max(100)).max(10),
   })
   .partial()
   .strict();
@@ -208,4 +209,6 @@ export const invoiceCreateSchema = z.object({ amountMinor: minor.optional(), due
 export const invoiceStatusSchema = z.object({ status: z.enum(['issued', 'paid', 'overdue', 'cancelled']), paymentReference: s(200).optional(), confirm: z.boolean().optional() }).strict();
 
 export const emailConnectSchema = z.object({ consent: z.literal(true, { message: 'You must authorise CreatorOS to send email on your behalf' }), senderDisplayName: s(120).optional() }).strict();
+export const instagramTokenSchema = z.object({ accessToken: z.string().trim().min(20).max(1000), consent: z.literal(true, { message: 'You must authorise CreatorOS to read and reply to brand DMs' }) }).strict();
+export const instagramPitchSchema = z.object({ body: z.string().trim().min(10).max(2000) }).strict();
 export const deleteAccountSchema = z.object({ password: z.string().min(1).max(200), confirm: z.literal(true) }).strict();

@@ -11,6 +11,7 @@ export const DELIVERY_STATUSES = [
   'cancelled',
   'received', // inbound from a provider webhook or simulation
   'logged', // manual note; not a verified external message
+  'sent_by_creator', // the creator sent it themselves (e.g. a first Instagram DM); not verified by a provider
 ];
 
 const messageSchema = new mongoose.Schema(
@@ -54,6 +55,14 @@ const messageSchema = new mongoose.Schema(
       intent: String,
       confidence: Number,
       provider: String,
+    },
+    // Inbound only. Classification and negotiation steps run in the
+    // `inbound.process` job, not inside the webhook request.
+    inboundProcessing: {
+      status: { type: String, enum: ['pending', 'processing', 'done', 'failed', 'interrupted'] },
+      attempts: Number,
+      lastError: String,
+      processedAt: Date,
     },
     metadata: { type: mongoose.Schema.Types.Mixed },
   },

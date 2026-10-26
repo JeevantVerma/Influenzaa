@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from 'react';
+import { Link } from 'react-router-dom';
 
 // ---- Icons (inline SVG, stroke-based) ----------------------------------------
 const PATHS = {
@@ -25,6 +26,10 @@ const PATHS = {
   logout: 'M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3',
   alert: 'M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
   briefcase: 'M4 7h16v13H4zM9 7V4h6v3M4 12h16',
+  chevron: 'M9 6l6 6-6 6',
+  rupee: 'M7 4h10M7 8h10M7 4c5 0 7 2 7 4s-2 4-7 4l8 8',
+  invoice: 'M6 3h9l3 3v15H6zM9 9h6M9 13h6M9 17h4',
+  clock: 'M12 7v5l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z',
 };
 
 export function Icon({ name, size = 18, className = 'nav-icon', label }) {
@@ -289,8 +294,48 @@ export function MoneyInput({ value, onChange, id, placeholder, currency = 'INR',
 export function ScoreBadge({ score }) {
   const tone = score >= 65 ? 'high' : score >= 40 ? 'mid' : 'low';
   return (
-    <span className={`score ${tone}`} title="Prioritisation score (not a prediction)">
+    <span className={`score ${tone}`} title="Match score out of 100. It helps you prioritise; it doesn't predict a deal.">
       {score ?? '–'}
     </span>
+  );
+}
+
+// ---- Page structure ---------------------------------------------------------------
+/** Page title with an optional back link (shown on phones) and actions. */
+export function PageHead({ title, subtitle, back, badges, actions }) {
+  return (
+    <header className="page-head">
+      {back && <Link to={back.to} className="back-link"><Icon name="chevron" size={16} className="flip" /> {back.label}</Link>}
+      <div className="page-head-row">
+        <div className="grow">
+          <div className="row wrap"><h1>{title}</h1>{badges}</div>
+          {subtitle && <p className="page-sub">{subtitle}</p>}
+        </div>
+        {actions && <div className="btn-group">{actions}</div>}
+      </div>
+    </header>
+  );
+}
+
+/** A titled block: heading row outside, content in a card. */
+export function Section({ title, aside, children, className = '', bodyClass = 'card-body', id }) {
+  return (
+    <section className={`section ${className}`} id={id} aria-label={typeof title === 'string' ? title : undefined}>
+      {(title || aside) && <div className="panel-title">{typeof title === 'string' ? <h2>{title}</h2> : title}{aside}</div>}
+      <div className={`card ${bodyClass === 'card-body' ? '' : 'panel'}`}><div className={bodyClass}>{children}</div></div>
+    </section>
+  );
+}
+
+/** Folded-away details (native <details>, keyboard accessible). */
+export function Disclosure({ title, meta, children, defaultOpen = false }) {
+  return (
+    <details className="disclosure" open={defaultOpen || undefined}>
+      <summary>
+        <span className="grow"><span className="strong">{title}</span>{meta && <span className="small muted"> · {meta}</span>}</span>
+        <Icon name="chevron" size={16} className="disclosure-chevron" />
+      </summary>
+      <div className="disclosure-body">{children}</div>
+    </details>
   );
 }

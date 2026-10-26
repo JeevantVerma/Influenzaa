@@ -8,6 +8,9 @@ import { listIntegrations, connectEmail, disconnectEmail } from '../services/int
 import { exportCreatorData, deleteAccount } from '../services/account.service.js';
 import { clearSessionCookies } from '../middleware/auth.js';
 import { notFound } from '../lib/errors.js';
+import * as instagram from '../services/instagram/instagram.service.js';
+import { enqueueJob } from '../jobs/queue.js';
+import { getConfig } from '../config/env.js';
 
 const router = Router();
 const me = (req) => req.user._id;
@@ -47,6 +50,28 @@ router.post('/invoices/:id/reminder', idParam(), async (req, res) => res.status(
 router.get('/integrations', async (req, res) => res.json(await listIntegrations(me(req))));
 router.post('/integrations/email/connect', validate({ body: S.emailConnectSchema }), async (req, res) => res.json(await connectEmail(me(req), req.body)));
 router.post('/integrations/email/disconnect', async (req, res) => res.json(await disconnectEmail(me(req))));
+router.get('/integrations/instagram/login-url', async (req, res) => res.json(instagram.instagramLoginUrl(me(req))));
+// Instagram redirects the browser here after login; the creator's session cookie identifies them.
+router.get('/integrations/instagram/callback', validate({ query: z.object({ code: z.string().max(2000).optional(), state: z.string().max(500).optional(), error: z.string().max(200).optional(), error_description: z.string().max(500).optional() }).passthrough() }), async (req, res) => {
+  const back = new URL('/settings', getConfig().frontendOrigins[0]);
+  back.searchParams.set('tab', 'integrations');
+  const q = req.validatedQuery;
+  try {
+    if (q.error || !q.code) throw new Error(q.error === 'access_denied' ? 'Instagram access was not granted.' : 'Instagram did not return a login code.');
+    await instagram.completeInstagramLogin(me(req), { code: q.code, state: q.state });
+    back.searchParams.set('instagram', 'connected');
+  } catch (err) {
+    back.searchParams.set('instagram', 'error');
+    back.searchParams.set('message', String(err.message).slice(0, 200));
+  }
+  res.redirect(back.toString());
+});
+router.post('/integrations/instagram/token', validate({ body: S.instagramTokenSchema }), async (req, res) => res.json(await instagram.connectInstagramWithToken(me(req), req.body)));
+router.post('/integrations/instagram/disconnect', async (req, res) => res.json(await instagram.disconnectInstagram(me(req))));
+router.post('/integrations/instagram/check-now', async (req, res) => {
+  const { job } = await enqueueJob({ jobType: 'inbound.instagram_poll', creatorId: me(req), payload: { creatorId: String(me(req)) }, idempotencyKey: `inbound:instagram:${me(req)}:${Math.floor(Date.now() / 30_000)}`, maxAttempts: 1 });
+  res.status(202).json({ queued: true, jobId: job?._id });
+});
 
 // ---- Notifications ---------------------------------------------------------------
 router.get('/notifications', validate({ query: z.object({ unread: z.enum(['true', 'false']).optional(), limit: z.coerce.number().int().min(1).max(100).default(30) }) }), async (req, res) => {

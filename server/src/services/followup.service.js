@@ -23,6 +23,8 @@ export async function runFollowUpCheck({ conversationId, attempt }) {
 
   if (conversation.status !== 'open') return suppress(conversation, 'conversation_closed');
   if (conversation.humanTakeover) return suppress(conversation, 'human_takeover');
+  // Instagram only allows replies within 24 hours of the brand's last message, never a nudge after silence.
+  if (conversation.channel === 'instagram') return suppress(conversation, 'instagram_no_follow_ups');
   if (!fu.enabled) return suppress(conversation, 'follow_ups_disabled');
   if (conversation.followUpCount >= (fu.maxAttempts ?? 2)) return suppress(conversation, 'max_attempts_reached');
   if (conversation.lastInboundAt && (!conversation.lastOutboundAt || conversation.lastInboundAt >= conversation.lastOutboundAt)) {

@@ -32,14 +32,15 @@ router.post('/conversations/:id/reopen', idParam(), async (req, res) => res.json
 router.post('/conversations/:id/cancel-follow-up', idParam(), async (req, res) => res.json(await cancelFollowUp(me(req), req.params.id)));
 
 // Demo only: inject a clearly-labelled simulated brand reply through the real
-// inbound pipeline (matching, dedupe, classification, negotiation).
+// inbound pipeline (matching, dedupe, then the same background job as the
+// webhook for classification and negotiation).
 router.post('/conversations/:id/simulate-inbound', idParam(), validate({ body: S.simulateInboundSchema }), async (req, res) => {
   if (!getConfig().demo.enabled) throw forbidden('Simulation is disabled on this server');
   const c = await Conversation.findOne({ _id: req.params.id, creatorId: me(req) }).lean();
   if (!c) throw notFound('Conversation');
   const brand = c.participants.find((p) => p.side === 'brand');
   const lastOut = await Message.findOne({ conversationId: c._id, direction: 'outbound', providerMessageId: { $ne: null } }).sort({ createdAt: -1 }).lean();
-  const result = await neg.processInbound({
+  const received = await neg.receiveInbound({
     provider: 'simulated',
     externalMessageId: `sim-${randomToken(12)}`,
     fromAddress: brand?.email,
@@ -49,7 +50,8 @@ router.post('/conversations/:id/simulate-inbound', idParam(), validate({ body: S
     inReplyTo: lastOut?.providerMessageId,
     simulated: true,
   });
-  res.status(201).json(result);
+  await neg.queueInboundProcessing(received);
+  res.status(202).json({ ...received, queued: true });
 });
 
 // ---- Deals / negotiations -------------------------------------------------------

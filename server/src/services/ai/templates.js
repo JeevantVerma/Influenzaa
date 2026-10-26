@@ -44,7 +44,15 @@ function termsLines(terms, currency) {
   return lines;
 }
 
-export function negotiationTemplate({ kind, creator, brand, terms, currency = 'INR', questions = [], reasons = [] }) {
+function aboutCreator(creator = {}) {
+  const niches = listText((creator.niches || []).slice(0, 4));
+  const platforms = [...new Set((creator.platformProfiles || []).map((p) => PLATFORM_NAMES[p.platform] || p.platform).filter(Boolean))];
+  const formats = listText((creator.contentFormats || []).slice(0, 3));
+  if (!niches) return '';
+  return `I create ${niches} content${platforms.length ? ` on ${listText(platforms)}` : ''}${formats ? `, mostly ${formats}` : ''}. `;
+}
+
+export function negotiationTemplate({ kind, creator, brand, terms, currency = 'INR', questions = [], reasons = [], brandOfferMinor = null }) {
   const name = creator.publicName || 'the creator';
   const subject = `Re: ${creator.publicName || 'Creator'} × ${brand.name}`;
   const block = terms ? termsLines(terms, currency).map((l) => `• ${l}`).join('\n') : '';
@@ -52,7 +60,7 @@ export function negotiationTemplate({ kind, creator, brand, terms, currency = 'I
     case 'counteroffer':
       return {
         subject,
-        body: `Hi ${brand.name} team,\n\nThank you for the offer — I'm genuinely excited about working together. Based on the scope and what it involves on my side, here is what I can propose:\n\n${block}\n\n${reasons.length ? `${reasons.join(' ')}\n\n` : ''}Happy to talk through the details if anything here needs adjusting.\n\nBest,`,
+        body: `Hi ${brand.name} team,\n\nThank you for the offer${brandOfferMinor != null ? ` of ${formatMoney(brandOfferMinor, currency)}` : ''}. Based on the scope and what it involves on my side, here is what I can propose:\n\n${block}\n\n${reasons.length ? `${reasons.join(' ')}\n\n` : ''}Happy to talk through the details if anything here needs adjusting.\n\nBest,`,
       };
     case 'acceptance':
       return {
@@ -69,6 +77,11 @@ export function negotiationTemplate({ kind, creator, brand, terms, currency = 'I
         subject,
         body: `Hi ${brand.name} team,\n\nThanks for the details! Before I can confirm, could you help me with a few points?\n\n${(questions.length ? questions : ['Could you share the complete scope and timeline?']).map((q) => `• ${q}`).join('\n')}\n\nLooking forward to it.\n\nBest,`,
       };
+    case 'acknowledgement':
+      return {
+        subject,
+        body: `Hi ${brand.name} team,\n\nThank you for confirming. I'm looking forward to working together, and I'll keep an eye out for the documents and the brief.\n\nBest,`,
+      };
     case 'follow_up':
       return {
         subject,
@@ -77,7 +90,7 @@ export function negotiationTemplate({ kind, creator, brand, terms, currency = 'I
     case 'info_reply':
       return {
         subject,
-        body: `Hi ${brand.name} team,\n\nThanks for getting back to me! I'd be happy to share more. Could you tell me a little about the campaign — the deliverables you have in mind, timelines, and usage needs? That will help me put together a proposal that fits.\n\nBest,`,
+        body: `Hi ${brand.name} team,\n\nThanks for getting back to me! ${aboutCreator(creator)}I'd be happy to share more, including audience details. Could you tell me a little about the campaign — the deliverables you have in mind, timelines, and usage needs? That will help me put together a proposal that fits.\n\nBest,`,
       };
     default:
       return { subject, body: `Hi ${brand.name} team,\n\nThank you for your message. I'll get back to you shortly.\n\nBest,` };

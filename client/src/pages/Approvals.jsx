@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApi } from '../api/hooks.js';
 import { ApprovalCard } from '../components/Negotiation.jsx';
-import { EmptyState, ErrorState, LoadingCard, Tabs } from '../components/ui.jsx';
+import { EmptyState, ErrorState, LoadingCard, PageHead, Tabs } from '../components/ui.jsx';
 
 export default function ApprovalsPage() {
   const [params, setParams] = useSearchParams();
@@ -16,18 +16,14 @@ export default function ApprovalsPage() {
   }, [focus, q.data]);
 
   return (
-    <div className="stack lg">
-      <div className="page-header">
-        <div>
-          <h1>Approval center</h1>
-          <p>Every commercial, contractual and sensitive action waits here for you. Nothing pending has been sent. Silence or opening a notification is never treated as approval.</p>
-        </div>
-      </div>
+    <div className="page-stack">
+      <PageHead title="Approvals" subtitle="Nothing is sent until you approve it here. Ignoring a request never counts as a yes." />
+      <div>
       <Tabs
         value={tab}
         onChange={(v) => setParams({ tab: v })}
         tabs={[
-          { value: 'pending', label: 'Pending', count: pendingCount.data?.total },
+          { value: 'pending', label: 'Waiting for you', count: pendingCount.data?.total },
           { value: 'history', label: 'History' },
         ]}
       />
@@ -37,8 +33,8 @@ export default function ApprovalsPage() {
         <ErrorState error={q.error} onRetry={q.refetch} />
       ) : !q.data.items.length ? (
         <div className="card">
-          <EmptyState title={tab === 'pending' ? 'No approvals waiting' : 'No approval history yet'} icon="shield">
-            {tab === 'pending' ? 'When the AI drafts a pitch, counteroffer or reply that needs your sign-off, it appears here with the exact message and the policy checks behind it.' : ''}
+          <EmptyState title={tab === 'pending' ? "You're all caught up" : 'Nothing here yet'} icon="shield">
+            {tab === 'pending' ? 'When a pitch, counteroffer or reply needs your OK, it shows up here with the exact email.' : ''}
           </EmptyState>
         </div>
       ) : (
@@ -48,6 +44,7 @@ export default function ApprovalsPage() {
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }

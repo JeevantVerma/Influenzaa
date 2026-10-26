@@ -1,5 +1,6 @@
 import { ApprovalRequest, BrandContact, Conversation, CreatorProfile, Deal, IntegrationConnection, Message, Opportunity, Suppression, User } from '../models/index.js';
 import { getEmailAdapter, buildOutboundEnvelope, EmailSendError } from './email/index.js';
+import { instagramSendBlock, sendInstagramMessage, instagramToken, INSTAGRAM_WINDOW_CLOSED } from './instagram/send.js';
 import { computeActionHash } from './approvals/actionHash.js';
 import { approvalRequirement } from './approvals/requirements.js';
 import { createApproval, createAutoAuthorization } from './approvals/approval.service.js';
@@ -17,6 +18,14 @@ export function withDisclosure(body, creatorName) {
   return body.includes(marker) ? body : `${body.trimEnd()}${DISCLOSURE(creatorName)}`;
 }
 
+// Instagram DMs are short (1000 bytes max), so the disclosure is one line.
+export const DM_DISCLOSURE = '— sent via CreatorOS (AI-assisted)';
+export const DM_MAX_BYTES = 1000;
+export function withDmDisclosure(body) {
+  return body.includes(DM_DISCLOSURE) ? body : `${body.trimEnd()}\n\n${DM_DISCLOSURE}`;
+}
+export const dmBytes = (text) => Buffer.byteLength(String(text || ''), 'utf8');
+
 /** Returns a reason string if outreach to this address is suppressed for the creator. */
 export async function suppressionFor(creatorId, emails) {
   const list = (emails || []).map((e) => String(e).toLowerCase());
@@ -31,7 +40,9 @@ export async function suppressionFor(creatorId, emails) {
 export async function emailChannelStatus(creatorId) {
   const conn = await IntegrationConnection.findOne({ creatorId, provider: 'email' }).lean();
   const adapter = getEmailAdapter();
-  const authorized = conn && ['connected', 'demo'].includes(conn.status);
+  // Consent given while sending was only simulated (status "demo") does not
+  // authorise real sending: a live provider needs a "connected" authorisation.
+  const authorized = conn && (adapter.mode === 'live' ? conn.status === 'connected' : ['connected', 'demo'].includes(conn.status));
   return { authorized: !!authorized, connection: conn, adapterMode: adapter.mode, adapterName: adapter.name };
 }
 
@@ -43,11 +54,12 @@ export async function emailChannelStatus(creatorId) {
 export async function proposeSend({ creatorId, conversation, deal, message, actionType, policyCategories = [], counterRule, terms, policyChecks = [], contextSnapshot = {}, extraReasons = [] }) {
   const profile = await CreatorProfile.findOne({ userId: creatorId }).lean();
   const req = approvalRequirement({ actionType, profile, content: message.content, policyCategories, counterRule, humanTakeover: conversation.humanTakeover });
-  const channel = await emailChannelStatus(creatorId);
+  const instagram = conversation.channel === 'instagram';
+  const authorized = instagram ? !!(await instagramToken(creatorId)) : (await emailChannelStatus(creatorId)).authorized;
   const reasons = [...req.reasons, ...extraReasons];
-  if (!channel.authorized) reasons.push({ code: 'channel_not_authorized', label: 'Email sending is not authorised yet (Settings → Integrations)' });
+  if (!authorized) reasons.push({ code: 'channel_not_authorized', label: instagram ? 'Instagram is not connected (Settings → Integrations)' : 'Email sending is not authorised yet (Settings → Integrations)' });
   const proposedAction = {
-    channel: 'email',
+    channel: instagram ? 'instagram' : 'email',
     messageId: String(message._id),
     to: message.toAddresses,
     subject: message.subject,
@@ -74,8 +86,20 @@ export async function proposeSend({ creatorId, conversation, deal, message, acti
   return { approval, autoAuthorized: false };
 }
 
+/** "Re: <original subject>", so every email after the first stays in the brand's thread. */
+export function threadSubject(original) {
+  const base = String(original || '').replace(/^\s*((re|fwd?|fw)\s*:\s*)+/i, '').trim();
+  return base ? `Re: ${base}` : null;
+}
+
 /** Creates an outbound draft message on a conversation. */
 export async function createDraft({ conversation, purpose, subject, body, creatorName, ai, to }) {
+  // Once an email has gone out or come in, replies keep the original subject:
+  // mail clients (Gmail especially) start a new thread when the subject changes.
+  const instagram = conversation.channel === 'instagram';
+  const threaded = !instagram && conversation.subject && (await Message.exists({ conversationId: conversation._id, providerMessageId: { $ne: null } }));
+  if (threaded) subject = threadSubject(conversation.subject) || subject;
+  if (instagram) subject = null; // DMs have no subject
   return Message.create({
     conversationId: conversation._id,
     creatorId: conversation.creatorId,
@@ -84,7 +108,7 @@ export async function createDraft({ conversation, purpose, subject, body, creato
     senderType: ai?.provider && ai.provider !== 'template' ? 'ai' : 'system',
     purpose,
     subject,
-    content: withDisclosure(body, creatorName),
+    content: instagram ? withDmDisclosure(body) : withDisclosure(body, creatorName),
     toAddresses: to,
     deliveryStatus: 'draft',
     approvalStatus: 'pending',
@@ -155,10 +179,20 @@ export async function deliverMessage({ messageId, approvalId }) {
     await markFailed(message, approval, suppressed);
     throw new NonRetryableError(suppressed);
   }
-  const channel = await emailChannelStatus(message.creatorId);
-  if (!channel.authorized) {
-    await markFailed(message, approval, 'Email sending is not authorised for this account. Nothing was sent.');
-    throw new NonRetryableError('Channel not authorised');
+  const instagram = conversation.channel === 'instagram';
+  if (instagram) {
+    // Checked before claiming the message, so a blocked DM is never shown as sent.
+    const blocked = await instagramSendBlock(message, conversation);
+    if (blocked) {
+      await markFailed(message, approval, blocked);
+      throw new NonRetryableError(blocked);
+    }
+  } else {
+    const channel = await emailChannelStatus(message.creatorId);
+    if (!channel.authorized) {
+      await markFailed(message, approval, 'Email sending is not authorised for this account. Nothing was sent.');
+      throw new NonRetryableError('Channel not authorised');
+    }
   }
 
   const claimed = await Message.findOneAndUpdate(
@@ -171,32 +205,48 @@ export async function deliverMessage({ messageId, approvalId }) {
 
   const user = await User.findById(message.creatorId).lean();
   const profile = await CreatorProfile.findOne({ userId: message.creatorId }).lean();
-  const creatorName = profile?.publicName || user?.name || 'Creator';
-  const lastExternal = await Message.findOne({ conversationId: conversation._id, providerMessageId: { $exists: true, $ne: null }, _id: { $ne: message._id } }).sort({ createdAt: -1 }).lean();
-  const envelope = buildOutboundEnvelope({
-    creatorName,
-    replyToken: conversation.replyToken,
-    to: message.toAddresses,
-    subject: message.subject,
-    text: message.content,
-    inReplyTo: lastExternal?.providerMessageId,
-    references: conversation.externalThreadId || undefined,
-  });
-
   let result;
-  try {
-    result = await getEmailAdapter().send(envelope);
-  } catch (err) {
-    const retryable = err instanceof EmailSendError ? err.retryable : true;
-    if (retryable) {
-      // Safe to retry: the provider definitively did not accept the message.
-      await Message.updateOne({ _id: message._id }, { $set: { deliveryStatus: 'queued', failureReason: err.message } });
-      await ApprovalRequest.updateOne({ _id: approval._id }, { $set: { executionStatus: 'queued' } });
-      throw err;
+  if (instagram) {
+    try {
+      result = await sendInstagramMessage(message, conversation);
+    } catch (err) {
+      if (err.retryable) {
+        await Message.updateOne({ _id: message._id }, { $set: { deliveryStatus: 'queued', failureReason: err.message } });
+        await ApprovalRequest.updateOne({ _id: approval._id }, { $set: { executionStatus: 'queued' } });
+        throw err;
+      }
+      await markFailed(message, approval, err.windowClosed ? INSTAGRAM_WINDOW_CLOSED : `Instagram did not accept the message: ${err.message}`);
+      throw new NonRetryableError(err.message);
     }
-    await markFailed(message, approval, err.message);
-    if (err.permanentBounce) await recordBounce(message.creatorId, message.toAddresses, message._id);
-    throw new NonRetryableError(err.message);
+  } else {
+    const creatorName = profile?.publicName || user?.name || 'Creator';
+    // Threading headers: reply to the latest email and list the whole thread.
+    const earlier = await Message.find({ conversationId: conversation._id, providerMessageId: { $exists: true, $ne: null }, _id: { $ne: message._id } }, { providerMessageId: 1 }).sort({ createdAt: 1 }).lean();
+    const lastExternal = earlier.at(-1);
+    const references = [...new Set([conversation.externalThreadId, ...earlier.map((m) => m.providerMessageId)].filter(Boolean))].slice(-20);
+    const envelope = buildOutboundEnvelope({
+      creatorName,
+      replyToken: conversation.replyToken,
+      to: message.toAddresses,
+      subject: message.subject,
+      text: message.content,
+      inReplyTo: lastExternal?.providerMessageId,
+      references: references.length ? references : undefined,
+    });
+    try {
+      result = await getEmailAdapter().send(envelope);
+    } catch (err) {
+      const retryable = err instanceof EmailSendError ? err.retryable : true;
+      if (retryable) {
+        // Safe to retry: the provider definitively did not accept the message.
+        await Message.updateOne({ _id: message._id }, { $set: { deliveryStatus: 'queued', failureReason: err.message } });
+        await ApprovalRequest.updateOne({ _id: approval._id }, { $set: { executionStatus: 'queued' } });
+        throw err;
+      }
+      await markFailed(message, approval, err.message);
+      if (err.permanentBounce) await recordBounce(message.creatorId, message.toAddresses, message._id);
+      throw new NonRetryableError(err.message);
+    }
   }
 
   const now = new Date();
@@ -208,7 +258,7 @@ export async function deliverMessage({ messageId, approvalId }) {
 
   conversation.lastOutboundAt = now;
   conversation.lastMessageAt = now;
-  if (!conversation.externalThreadId) conversation.externalThreadId = result.providerMessageId;
+  if (!conversation.externalThreadId && !instagram) conversation.externalThreadId = result.providerMessageId;
   if (message.purpose === 'follow_up') conversation.followUpCount += 1;
 
   const deal = conversation.dealId ? await Deal.findById(conversation.dealId) : null;
@@ -224,7 +274,7 @@ export async function deliverMessage({ messageId, approvalId }) {
       await Opportunity.updateOne({ _id: deal.opportunityId, status: { $in: ['new', 'saved', 'outreach_drafted'] } }, { $set: { status: 'contacted' } });
     }
   }
-  if (['pitch', 'follow_up'].includes(message.purpose) && !conversation.humanTakeover) {
+  if (['pitch', 'follow_up'].includes(message.purpose) && !conversation.humanTakeover && !instagram) {
     await scheduleFollowUp(conversation, profile, now);
   }
   await conversation.save();

@@ -17,6 +17,8 @@ const discoveryConfigurationSchema = new mongoose.Schema(
         ),
       ],
       searchQueries: [String],
+      // Instagram handles of creators similar to this creator; brands sponsoring them are strong leads.
+      instagramCreators: [String],
     },
     lastRunAt: Date,
     nextRunAt: { type: Date, default: null },

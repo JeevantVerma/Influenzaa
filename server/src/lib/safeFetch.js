@@ -71,7 +71,7 @@ export async function safeFetch(raw, { timeoutMs = 10_000, maxBytes = 2 * 1024 *
       continue;
     }
     try {
-      if (!res.ok) throw new SafeFetchError(`Upstream responded ${res.status}`);
+      if (!res.ok) throw Object.assign(new SafeFetchError(`Upstream responded ${res.status}`), { status: res.status });
       const reader = res.body.getReader();
       const chunks = [];
       let size = 0;

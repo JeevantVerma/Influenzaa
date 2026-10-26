@@ -2,8 +2,11 @@ import { getConfig } from '../../../config/env.js';
 import { demoSource } from './demo.source.js';
 import { rssSource } from './rss.source.js';
 import { braveSource } from './brave.source.js';
+import { gdeltSource } from './gdelt.source.js';
+import { serperSource } from './serper.source.js';
+import { instagramSource } from './instagram.source.js';
 
-const ALL = { demo: demoSource, rss: rssSource, brave: braveSource };
+const ALL = { demo: demoSource, rss: rssSource, brave: braveSource, gdelt: gdeltSource, serper: serperSource, instagram: instagramSource };
 
 /** Sources enabled at the platform level (DISCOVERY_SOURCES). */
 export function platformSources() {

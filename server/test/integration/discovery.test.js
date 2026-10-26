@@ -148,4 +148,25 @@ describe('persistent sponsor discovery', () => {
     const bad = await c.patch('/discovery/config', { rssFeeds: [{ url: 'http://127.0.0.1/feed.xml', brandDomain: 'evil.example' }] });
     expect(bad.status).toBe(400);
   });
+
+  it('stores similar creators as clean Instagram handles and accepts the real sources', async () => {
+    const c = await signUp(ctx.app);
+    const saved = await c.patch('/discovery/config', { instagramCreators: ['@Fit.Priya', 'https://www.instagram.com/fit_rahul/', 'fit.priya'] });
+    expect(saved.status).toBe(200);
+    expect(saved.body.sourceConfiguration.instagramCreators).toEqual(['fit.priya', 'fit_rahul']);
+    const bad = await c.patch('/discovery/config', { instagramCreators: ['instagram.com/p/XYZ'] });
+    expect(bad.status).toBe(400);
+    expect((await c.patch('/discovery/config', { instagramCreators: Array.from({ length: 11 }, (_, i) => `creator${i}`) })).status).toBe(422); // schema: max 10
+    // Source toggles accept the real source ids (only platform-enabled ones are allowed).
+    expect((await c.patch('/discovery/config', { enabledSources: ['gdelt'] })).status).toBe(400); // not enabled in tests
+    expect((await c.patch('/discovery/config', { enabledSources: ['nonsense'] })).status).toBe(422);
+    expect((await c.patch('/discovery/config', { enabledSources: [] })).status).toBe(422); // an empty list would silently mean "all"
+  });
+
+  it('new accounts follow the platform\'s sources instead of a copy made at signup', async () => {
+    const c = await signUp(ctx.app);
+    const status = (await c.get('/discovery/status')).body;
+    expect(status.sourceConfiguration.enabledSources).toEqual([]);
+    expect(status.sources.every((s) => s.enabled)).toBe(true);
+  });
 });

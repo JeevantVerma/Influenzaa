@@ -12,6 +12,15 @@ export function normalizeDomain(input) {
   }
 }
 
+/** "@Name", "name" or an instagram.com profile URL → "name"; null if it is not a valid handle. */
+export function normalizeInstagramHandle(input) {
+  let s = String(input || '').trim();
+  const fromUrl = /^(?:https?:\/\/)?(?:www\.)?instagram\.com\/([^/?#]+)/i.exec(s);
+  if (fromUrl) s = fromUrl[1];
+  s = s.replace(/^@/, '').toLowerCase();
+  return /^[a-z0-9._]{1,30}$/.test(s) && !/^(p|reel|reels|explore|stories|accounts)$/.test(s) ? s : null;
+}
+
 /** Normalises free text for dedupe keys: lowercase, alphanumerics only, collapsed spaces. */
 export function normalizeText(s) {
   return String(s || '')

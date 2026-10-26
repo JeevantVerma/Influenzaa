@@ -75,7 +75,8 @@ async function ensureCreatorRecords(user) {
         creatorId: user._id,
         status: 'stopped', // Discovery stays stopped until the creator enables it.
         intervalMinutes: getConfig().discovery.defaultIntervalMinutes,
-        sourceConfiguration: { enabledSources: getConfig().discovery.sources, rssFeeds: [], searchQueries: [] },
+        // No list = every source the platform has on, including ones added later.
+        sourceConfiguration: { enabledSources: [], rssFeeds: [], searchQueries: [] },
       },
     },
     { upsert: true },
