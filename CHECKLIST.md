@@ -2,7 +2,7 @@
 
 Legend: ✅ implemented and verified (tests and/or a manual browser walkthrough) · 🟡 implemented, partially verified · ⬜ not started
 
-Last updated: 2026-10-19
+Last updated: 2026-10-27
 
 ## Phase 1 — Foundation
 - ✅ npm workspaces monorepo (`server`, `client`), documented commands
@@ -62,12 +62,12 @@ Last updated: 2026-10-19
 
 ## Phase 4 — Email and conversations
 - ✅ Email adapter interface: demo (simulated), SMTP (nodemailer), disabled
-- 🟡 SMTP adapter: implemented; Gmail SMTP and IMAP logins verified (2026-10-20); no real message sent through the app yet
+- ✅ SMTP adapter: real messages sent through the app with Gmail SMTP during the live test negotiation (2026-10-20/21)
 - ✅ Explicit creator authorisation for sending, with stored consent text; revocable
 - ✅ Consent recorded while sending was simulated doesn't authorise real sending; the creator authorises again once a live provider is configured
 - ✅ Truthful sender identity, AI-assistance disclosure and unsubscribe line on every message
 - ✅ Inbound webhook with HMAC signature and timestamp; dedupe by provider message id (tested)
-- 🟡 Development email via your own Gmail: SMTP send + IMAP reply checker (`+cos-{token}` reply addresses, read-only, starts at now, skips own sent mail); tested with a fake mailbox, not yet with real Gmail
+- ✅ Development email via your own Gmail: SMTP send + IMAP reply checker (`+cos-{token}` reply addresses, read-only, starts at now, skips own sent mail); unit-tested with a fake mailbox and used live with real Gmail (2026-10-20/21)
 - ⬜ Production email: per-creator Gmail OAuth (`gmail.send`), reply copies via Cloudflare Email Routing to a CreatorOS domain, Google OAuth verification
 - ✅ Webhook stores and queues only; AI and negotiation steps run in the `inbound.process` job with retry, offer-once guard, and creator review on interruption (tested)
 - ✅ Thread matching by reply token or RFC 5322 headers only, never by brand name (tested)
@@ -75,7 +75,7 @@ Last updated: 2026-10-19
 - ✅ Follow-ups: business-day scheduling, max attempts, stop on reply / opt-out / takeover, cancellable, suppression reason recorded
 - ✅ Unified inbox: timeline with draft / queued / sent / simulated / failed labels, notes, human takeover, off-platform marker
 - ✅ Demo-only reply simulator that runs the real inbound pipeline (same background job as the webhook; UI polls while analysing; verified in the browser with live Gemini)
-- ✅ Integration status panel (email, AI, worker, sources, WhatsApp/Instagram unavailable)
+- ✅ Integration status panel (email incl. inbound checker, AI, worker, sources, Instagram connection, WhatsApp unavailable)
 
 ## Phase 5 — Campaign operations
 - ✅ Confirmed deal → campaign (idempotent); written agreement confirmation bound to the accepted-terms hash
@@ -93,16 +93,18 @@ Last updated: 2026-10-19
 - ✅ Health and readiness endpoints, graceful shutdown, separate worker process
 - ✅ OpenAPI document at `/api/v1/openapi.json`
 - ✅ Data export and account deletion
+- ✅ Integration tokens encrypted with a dedicated `ENCRYPTION_KEY` (required in production; older tokens saved under `AUTH_SECRET` still decrypt), so rotating `AUTH_SECRET` doesn't disconnect Instagram (tested, 2026-10-27)
+- ✅ Dependency audit clean (`npm audit fix`: body-parser 2.4.0, fast-uri 3.1.9; 2026-10-27)
 - ✅ Admin metrics endpoint (aggregate only, audit-logged); `create-admin` script
 - ⬜ Error monitoring hook (Sentry or equivalent) — add a transport in `lib/logger.js` and `errorHandler.js`
 - ⬜ Official WhatsApp Business adapter (needs Meta Business verification, phone number id, templates)
-- ⬜ Official Instagram messaging adapter (needs Meta app review and an Instagram professional account)
+- 🟡 Official Instagram messaging adapter: built and live-tested in development (see Phase 2). Still needed for other creators: Meta App Review + Business Verification, Instagram login over HTTPS, webhooks instead of polling
 - ⬜ Browser E2E suite (Playwright)
 
 ## Outstanding / next steps
-1. **Credentials.** Run one real Anthropic extraction and draft with `ANTHROPIC_API_KEY`, and check that the response format and refusal fallback work against the live API.
-2. **SMTP + inbound relay.** Configure SMTP with SPF/DKIM/DMARC, plus an inbound provider that forwards `reply+*@<domain>` to `/api/v1/webhooks/email`. A small adapter maps the provider's payload to the documented shape.
-3. **Per-creator mailbox** (Gmail/Outlook OAuth). Add encrypted credential storage (AES-256-GCM with a KMS-managed key) and IMAP or Gmail push ingestion.
+1. **Credentials.** Run one real Anthropic extraction and draft with `ANTHROPIC_API_KEY` (`npm run ai:smoke -w server`), and check that the response format and refusal fallback work against the live API.
+2. **Production email.** Per-creator Gmail OAuth (`gmail.send`) and Google OAuth verification, plus reply copies to a CreatorOS domain via Cloudflare Email Routing (see CLAUDE.md priority 5).
+3. **Secrets.** Move `ENCRYPTION_KEY` (and other secrets) into a KMS or secret manager before launch.
 4. **AI contract and brief review** (priority 1): extract clauses from uploaded PDFs and flag them against policy.
 5. **Analytics.** Platform analytics via official APIs, to turn creator-entered metrics into verified ones.
 6. **Playwright E2E** for the main browser flows; Indian public holiday calendar for follow-ups.
@@ -112,8 +114,12 @@ Last updated: 2026-10-19
 ## External access required
 | Item | Purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` | Real classification, extraction and drafting |
-| SMTP account + verified sending domain | Real outbound email |
-| Inbound email provider + `INBOUND_WEBHOOK_SECRET` | Receiving brand replies |
-| `BRAVE_SEARCH_API_KEY` (optional) | Search-based discovery |
-| Meta Business / WhatsApp Business Platform / Instagram app review | Post-MVP messaging channels |
+| `ANTHROPIC_API_KEY` | Claude for classification, extraction and drafting (launch target; needs paid credits) |
+| `GEMINI_API_KEY` | Gemini free tier, used in development until Claude credits exist |
+| `SERPER_API_KEY` | Brand creator-programme search and Google News backup for discovery |
+| `APIFY_TOKEN` | Instagram discovery (cost-capped by `APIFY_MAX_USD_PER_RUN`) |
+| Gmail address + app password | Development email (SMTP send + IMAP replies) |
+| Gmail OAuth app + Google verification, reply domain | Production email per creator |
+| Meta app (published) + Instagram professional account | Instagram DMs; App Review + Business Verification for other creators |
+| `BRAVE_SEARCH_API_KEY` (optional) | Brave search source |
+| WhatsApp Business Platform | Post-MVP messaging channel |

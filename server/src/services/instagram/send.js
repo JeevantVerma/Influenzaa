@@ -20,7 +20,7 @@ export function instagramWindow(conversation, now = new Date()) {
 export async function instagramToken(creatorId) {
   const conn = await IntegrationConnection.findOne({ creatorId, provider: 'instagram' }).select('+encryptedCredentialReference').lean();
   if (!conn || conn.status !== 'connected' || !conn.encryptedCredentialReference) return null;
-  return { token: decryptSecret(conn.encryptedCredentialReference, getConfig().authSecret), conn };
+  return { token: decryptSecret(conn.encryptedCredentialReference, getConfig().tokenKeys), conn };
 }
 
 /** Reason a DM cannot be sent right now, or null. Nothing is sent when this returns a reason. */

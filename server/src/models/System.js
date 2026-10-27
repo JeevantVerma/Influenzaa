@@ -81,7 +81,7 @@ const integrationConnectionSchema = new mongoose.Schema(
     scopes: [String],
     senderDisplayName: String,
     consent: { text: String, acceptedAt: Date },
-    // Provider access token, AES-GCM encrypted (lib/crypto.js encryptSecret). Never returned by default.
+    // Provider access token, AES-GCM encrypted with ENCRYPTION_KEY (lib/crypto.js encryptSecret). Never returned by default.
     encryptedCredentialReference: { type: String, default: null, select: false },
     // Instagram professional account connected for DMs.
     instagram: {

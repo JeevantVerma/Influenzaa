@@ -288,6 +288,7 @@ All variables are in `server/.env.example` with comments. The client has no secr
 | `MONGODB_URI` | ✓ | |
 | `FRONTEND_URL` | | Comma-separated allowed origins. The first one is used in password-reset links. |
 | `AUTH_SECRET` | ✓ | ≥ 32 characters. Production refuses the placeholder. |
+| `ENCRYPTION_KEY` | production | ≥ 32 characters, different from `AUTH_SECRET`. Encrypts stored integration tokens. |
 | `SESSION_TTL_HOURS` | | Default 168 |
 | `TRUST_PROXY` | | `true` behind a reverse proxy |
 | `AI_PROVIDER` | | `auto` (default): Anthropic when its key is set, else Gemini when its key is set, otherwise the mock in dev and disabled in prod. Also `anthropic`, `gemini`, `mock`, `disabled`. |
@@ -334,7 +335,7 @@ Every integration reports an explicit state in Settings → Integrations:
 | WhatsApp | `unavailable` | Planned. Requires the WhatsApp Business Platform; there are no unofficial automations. Off-platform conversations can be recorded as notes. |
 | Payments | n/a | Invoices and payment status only. "Paid" is always labelled **creator-reported**, because CreatorOS never moves or holds money. |
 
-**Integration credentials.** Instagram access tokens are stored in `integrationConnections.encryptedCredentialReference`, encrypted with AES-256-GCM under a key derived from `AUTH_SECRET` (rotating it means creators reconnect), and are never returned by the API. Before launch, move the key to a KMS or secret manager.
+**Integration credentials.** Instagram access tokens are stored in `integrationConnections.encryptedCredentialReference`, encrypted with AES-256-GCM under a key derived from `ENCRYPTION_KEY` (required in production; development falls back to `AUTH_SECRET`, and tokens saved under `AUTH_SECRET` still decrypt after `ENCRYPTION_KEY` is added), and are never returned by the API. Rotating `AUTH_SECRET` signs everyone out but does not disconnect integrations; rotating `ENCRYPTION_KEY` does. Before launch, move the key to a KMS or secret manager.
 
 ---
 
@@ -360,7 +361,7 @@ The live checks (`ai:smoke`, `discovery:smoke`) are described in section 3. `ai:
 ## Deployment
 
 1. Provision MongoDB (Atlas or self-hosted replica set), configure SMTP plus SPF/DKIM/DMARC, and set up an inbound email relay to the webhook.
-2. Set `NODE_ENV=production`, a strong `AUTH_SECRET`, `TRUST_PROXY=true`, `EMAIL_PROVIDER=smtp`, `DISCOVERY_SOURCES=rss` (or `rss,brave`), `ANTHROPIC_API_KEY`, and `RUN_WORKER_IN_PROCESS=false`.
+2. Set `NODE_ENV=production`, a strong `AUTH_SECRET`, a separate `ENCRYPTION_KEY`, `TRUST_PROXY=true`, `EMAIL_PROVIDER=smtp`, `DISCOVERY_SOURCES=rss` (or `rss,brave`), `ANTHROPIC_API_KEY`, and `RUN_WORKER_IN_PROCESS=false`.
 3. Build the client with `npm run build` (output: `client/dist`). Serve it from the same origin as the API behind a reverse proxy: `/api/*` → API, everything else → `client/dist` with SPA fallback to `index.html`. Same-origin serving keeps the SameSite cookies and CSRF model intact.
 4. Run one or more API processes:
    ```bash

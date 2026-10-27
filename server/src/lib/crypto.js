@@ -29,8 +29,7 @@ export async function verifyPassword(password, stored) {
 
 /**
  * Encrypts a secret (e.g. an integration access token) with AES-256-GCM. The
- * key is derived from `secret` (the server's AUTH_SECRET); rotating it means
- * creators reconnect their integrations.
+ * key is derived from `secret` (ENCRYPTION_KEY, or AUTH_SECRET when unset).
  */
 export function encryptSecret(plain, secret) {
   const key = Buffer.from(crypto.hkdfSync('sha256', secret, 'creatoros', 'integration-tokens', 32));
@@ -40,13 +39,21 @@ export function encryptSecret(plain, secret) {
   return `v1.${iv.toString('base64')}.${cipher.getAuthTag().toString('base64')}.${data.toString('base64')}`;
 }
 
-export function decryptSecret(blob, secret) {
+/** Decrypts with `secrets` (one key, or a list tried in order, e.g. current then previous). */
+export function decryptSecret(blob, secrets) {
   const [v, iv, tag, data] = String(blob || '').split('.');
   if (v !== 'v1' || !iv || !tag || !data) throw new Error('Unreadable secret');
-  const key = Buffer.from(crypto.hkdfSync('sha256', secret, 'creatoros', 'integration-tokens', 32));
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
-  decipher.setAuthTag(Buffer.from(tag, 'base64'));
-  return Buffer.concat([decipher.update(Buffer.from(data, 'base64')), decipher.final()]).toString('utf8');
+  for (const secret of [secrets].flat()) {
+    try {
+      const key = Buffer.from(crypto.hkdfSync('sha256', secret, 'creatoros', 'integration-tokens', 32));
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
+      decipher.setAuthTag(Buffer.from(tag, 'base64'));
+      return Buffer.concat([decipher.update(Buffer.from(data, 'base64')), decipher.final()]).toString('utf8');
+    } catch {
+      // wrong key: try the next one
+    }
+  }
+  throw new Error('Unreadable secret');
 }
 
 export function randomToken(bytes = 32) {

@@ -95,7 +95,7 @@ async function saveConnection(creatorId, token, { via, expiresIn }) {
         mode: 'live',
         scopes: ['instagram_business_basic', 'instagram_business_manage_messages'],
         consent: { text: INSTAGRAM_CONSENT_TEXT, acceptedAt: now },
-        encryptedCredentialReference: encryptSecret(token, getConfig().authSecret),
+        encryptedCredentialReference: encryptSecret(token, getConfig().tokenKeys[0]),
         connectedAt: now,
         disconnectedAt: null,
         lastError: subscribeError ? { message: subscribeError, at: now } : null,
@@ -153,7 +153,7 @@ export async function refreshInstagramTokens({ now = new Date() } = {}) {
     try {
       const { token } = await instagramToken(creatorId);
       const r = await instagramClient().refreshToken(token);
-      await IntegrationConnection.updateOne({ creatorId, provider: 'instagram' }, { $set: { encryptedCredentialReference: encryptSecret(r.accessToken, getConfig().authSecret), 'instagram.tokenExpiresAt': new Date(now.getTime() + r.expiresIn * 1000), 'instagram.tokenRefreshedAt': now } });
+      await IntegrationConnection.updateOne({ creatorId, provider: 'instagram' }, { $set: { encryptedCredentialReference: encryptSecret(r.accessToken, getConfig().tokenKeys[0]), 'instagram.tokenExpiresAt': new Date(now.getTime() + r.expiresIn * 1000), 'instagram.tokenRefreshedAt': now } });
       refreshed++;
     } catch (err) {
       await IntegrationConnection.updateOne({ creatorId, provider: 'instagram' }, { $set: { lastError: { message: `Could not renew the Instagram connection: ${err.message}. Reconnect in Settings.`, at: now } } });

@@ -17,6 +17,9 @@ const schema = z.object({
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
   FRONTEND_URL: z.string().default('http://localhost:5173'),
   AUTH_SECRET: z.string().min(32, 'AUTH_SECRET must be at least 32 characters'),
+  // Encrypts stored integration tokens. Separate from AUTH_SECRET so rotating the
+  // session secret does not disconnect creators' integrations.
+  ENCRYPTION_KEY: z.string().min(32, 'ENCRYPTION_KEY must be at least 32 characters').optional().or(z.literal('').transform(() => undefined)),
   SESSION_TTL_HOURS: z.coerce.number().int().positive().default(24 * 7),
   TRUST_PROXY: bool(false),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
@@ -129,6 +132,8 @@ function buildConfig(raw) {
   if (isProd && e.AUTH_SECRET.includes('change-me')) {
     problems.push('AUTH_SECRET still contains the placeholder value');
   }
+  if (isProd && !e.ENCRYPTION_KEY) problems.push('ENCRYPTION_KEY is required in production (encrypts stored integration tokens)');
+  if (e.ENCRYPTION_KEY && e.ENCRYPTION_KEY === e.AUTH_SECRET) problems.push('ENCRYPTION_KEY must be different from AUTH_SECRET');
 
   const sources = e.DISCOVERY_SOURCES.split(',').map((s) => s.trim()).filter(Boolean);
   for (const s of sources) {
@@ -149,6 +154,9 @@ function buildConfig(raw) {
     mongoUri: e.MONGODB_URI,
     frontendOrigins: e.FRONTEND_URL.split(',').map((s) => s.trim()).filter(Boolean),
     authSecret: e.AUTH_SECRET,
+    // Integration tokens are encrypted with the first key; decryption also tries
+    // AUTH_SECRET so tokens saved before ENCRYPTION_KEY was set keep working.
+    tokenKeys: e.ENCRYPTION_KEY ? [e.ENCRYPTION_KEY, e.AUTH_SECRET] : [e.AUTH_SECRET],
     sessionTtlMs: e.SESSION_TTL_HOURS * 3600_000,
     trustProxy: e.TRUST_PROXY,
     logLevel: e.NODE_ENV === 'test' ? 'silent' : e.LOG_LEVEL,

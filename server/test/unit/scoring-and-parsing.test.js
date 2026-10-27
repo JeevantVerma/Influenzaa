@@ -7,6 +7,7 @@ import { normalizeDomain } from '../../src/lib/domain.js';
 import { addBusinessDays } from '../../src/lib/businessDays.js';
 import { isDisallowedAddress } from '../../src/lib/safeFetch.js';
 import { buildConfig } from '../../src/config/env.js';
+import { encryptSecret, decryptSecret } from '../../src/lib/crypto.js';
 import { dedupeKeyFor } from '../../src/services/discovery/pipeline.js';
 
 const profile = {
@@ -112,11 +113,35 @@ describe('configuration safety', () => {
   it('never silently uses mock integrations in production', () => {
     expect(() => buildConfig({ ...base, NODE_ENV: 'production', AI_PROVIDER: 'mock', EMAIL_PROVIDER: 'disabled', DISCOVERY_SOURCES: 'rss' })).toThrow(/mock is not allowed/);
     expect(() => buildConfig({ ...base, NODE_ENV: 'production', EMAIL_PROVIDER: 'demo', DISCOVERY_SOURCES: 'rss' })).toThrow(/EMAIL_PROVIDER=demo/);
-    const cfg = buildConfig({ ...base, NODE_ENV: 'production', EMAIL_PROVIDER: 'disabled', DISCOVERY_SOURCES: 'rss' });
+    const cfg = buildConfig({ ...base, NODE_ENV: 'production', EMAIL_PROVIDER: 'disabled', DISCOVERY_SOURCES: 'rss', ENCRYPTION_KEY: 'k'.repeat(40) });
     expect(cfg.ai.provider).toBe('disabled');
     expect(cfg.demo.enabled).toBe(false);
   });
   it('requires a strong auth secret', () => {
     expect(() => buildConfig({ MONGODB_URI: 'mongodb://x/y', AUTH_SECRET: 'short' })).toThrow(/AUTH_SECRET/);
+  });
+  it('requires a separate token encryption key in production', () => {
+    const prod = { ...base, NODE_ENV: 'production', EMAIL_PROVIDER: 'disabled', DISCOVERY_SOURCES: 'rss' };
+    expect(() => buildConfig(prod)).toThrow(/ENCRYPTION_KEY is required/);
+    expect(() => buildConfig({ ...prod, ENCRYPTION_KEY: base.AUTH_SECRET })).toThrow(/different from AUTH_SECRET/);
+    expect(buildConfig({ ...base, ENCRYPTION_KEY: '' }).tokenKeys).toEqual([base.AUTH_SECRET]);
+  });
+});
+
+describe('integration token encryption', () => {
+  const authSecret = 'a'.repeat(40);
+  const encryptionKey = 'k'.repeat(40);
+  it('keeps tokens readable when AUTH_SECRET rotates, once ENCRYPTION_KEY is set', () => {
+    const blob = encryptSecret('ig-token', encryptionKey);
+    expect(decryptSecret(blob, [encryptionKey, 'rotated-auth-secret-'.repeat(3)])).toBe('ig-token');
+  });
+  it('still reads tokens saved under AUTH_SECRET before ENCRYPTION_KEY existed', () => {
+    const old = encryptSecret('old-token', authSecret);
+    expect(decryptSecret(old, [encryptionKey, authSecret])).toBe('old-token');
+  });
+  it('rejects tampered or unknown-key blobs', () => {
+    const blob = encryptSecret('ig-token', encryptionKey);
+    expect(() => decryptSecret(blob, ['x'.repeat(40)])).toThrow(/Unreadable/);
+    expect(() => decryptSecret(`${blob.slice(0, -4)}AAAA`, encryptionKey)).toThrow(/Unreadable/);
   });
 });
