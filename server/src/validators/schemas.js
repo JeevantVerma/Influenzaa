@@ -210,5 +210,6 @@ export const invoiceStatusSchema = z.object({ status: z.enum(['issued', 'paid', 
 
 export const emailConnectSchema = z.object({ consent: z.literal(true, { message: 'You must authorise CreatorOS to send email on your behalf' }), senderDisplayName: s(120).optional() }).strict();
 export const instagramTokenSchema = z.object({ accessToken: z.string().trim().min(20).max(1000), consent: z.literal(true, { message: 'You must authorise CreatorOS to read and reply to brand DMs' }) }).strict();
+export const whatsappTokenSchema = z.object({ phoneNumberId: z.string().trim().regex(/^\d{5,30}$/, 'Phone number ID is a long number from the WhatsApp API setup page'), accessToken: z.string().trim().min(20).max(2000), consent: z.literal(true, { message: 'You must authorise CreatorOS to receive and reply to brand messages' }) }).strict();
 export const instagramPitchSchema = z.object({ body: z.string().trim().min(10).max(2000) }).strict();
 export const deleteAccountSchema = z.object({ password: z.string().min(1).max(200), confirm: z.literal(true) }).strict();

@@ -14,6 +14,7 @@ import { BrandProfile } from '../models/index.js';
 import { notFound } from '../lib/errors.js';
 import { requestContactDiscovery } from '../services/contacts/contactDiscovery.service.js';
 import * as instagram from '../services/instagram/instagram.service.js';
+import { whatsappLinkFor } from '../services/whatsapp/whatsapp.service.js';
 
 const router = Router();
 const me = (req) => req.user._id;
@@ -55,6 +56,7 @@ router.post('/opportunities/:id/feedback', idParam(), validate({ body: S.feedbac
 router.post('/opportunities/:id/draft-pitch', idParam(), async (req, res) => res.json(await generatePitch(me(req), req.params.id)));
 router.post('/opportunities/:id/instagram-pitch/draft', idParam(), async (req, res) => res.json(await instagram.draftInstagramPitch(me(req), req.params.id)));
 router.post('/opportunities/:id/instagram-pitch', idParam(), validate({ body: S.instagramPitchSchema }), async (req, res) => res.status(201).json(await instagram.startInstagramPitch(me(req), req.params.id, req.body)));
+router.post('/conversations/:id/whatsapp-link', idParam(), async (req, res) => res.json(await whatsappLinkFor(me(req), req.params.id)));
 router.post('/conversations/:id/instagram-pitch-sent', idParam(), async (req, res) => res.json(await instagram.markInstagramPitchSent(me(req), req.params.id)));
 router.post('/opportunities/:id/initiate-outreach', idParam(), validate({ body: S.outreachSchema }), async (req, res) => res.status(201).json(await initiateOutreach(me(req), req.params.id, req.body)));
 router.post('/opportunities/:id/contacts', idParam(), validate({ body: S.contactSchema }), async (req, res) => res.status(201).json(await opps.addContact(me(req), req.params.id, req.body)));

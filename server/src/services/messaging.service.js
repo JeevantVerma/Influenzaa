@@ -1,6 +1,7 @@
 import { ApprovalRequest, BrandContact, Conversation, CreatorProfile, Deal, IntegrationConnection, Message, Opportunity, Suppression, User } from '../models/index.js';
 import { getEmailAdapter, buildOutboundEnvelope, EmailSendError } from './email/index.js';
 import { instagramSendBlock, sendInstagramMessage, instagramToken, INSTAGRAM_WINDOW_CLOSED } from './instagram/send.js';
+import { whatsappSendBlock, sendWhatsAppMessage, whatsappToken, WHATSAPP_WINDOW_CLOSED } from './whatsapp/send.js';
 import { computeActionHash } from './approvals/actionHash.js';
 import { approvalRequirement } from './approvals/requirements.js';
 import { createApproval, createAutoAuthorization } from './approvals/approval.service.js';
@@ -54,12 +55,12 @@ export async function emailChannelStatus(creatorId) {
 export async function proposeSend({ creatorId, conversation, deal, message, actionType, policyCategories = [], counterRule, terms, policyChecks = [], contextSnapshot = {}, extraReasons = [] }) {
   const profile = await CreatorProfile.findOne({ userId: creatorId }).lean();
   const req = approvalRequirement({ actionType, profile, content: message.content, policyCategories, counterRule, humanTakeover: conversation.humanTakeover });
-  const instagram = conversation.channel === 'instagram';
-  const authorized = instagram ? !!(await instagramToken(creatorId)) : (await emailChannelStatus(creatorId)).authorized;
+  const chat = conversation.channel === 'instagram' || conversation.channel === 'whatsapp' ? conversation.channel : null;
+  const authorized = chat === 'instagram' ? !!(await instagramToken(creatorId)) : chat === 'whatsapp' ? !!(await whatsappToken(creatorId)) : (await emailChannelStatus(creatorId)).authorized;
   const reasons = [...req.reasons, ...extraReasons];
-  if (!authorized) reasons.push({ code: 'channel_not_authorized', label: instagram ? 'Instagram is not connected (Settings → Integrations)' : 'Email sending is not authorised yet (Settings → Integrations)' });
+  if (!authorized) reasons.push({ code: 'channel_not_authorized', label: chat === 'instagram' ? 'Instagram is not connected (Settings → Integrations)' : chat === 'whatsapp' ? 'WhatsApp is not connected (Settings → Integrations)' : 'Email sending is not authorised yet (Settings → Integrations)' });
   const proposedAction = {
-    channel: instagram ? 'instagram' : 'email',
+    channel: chat || 'email',
     messageId: String(message._id),
     to: message.toAddresses,
     subject: message.subject,
@@ -96,7 +97,8 @@ export function threadSubject(original) {
 export async function createDraft({ conversation, purpose, subject, body, creatorName, ai, to }) {
   // Once an email has gone out or come in, replies keep the original subject:
   // mail clients (Gmail especially) start a new thread when the subject changes.
-  const instagram = conversation.channel === 'instagram';
+  // Instagram and WhatsApp are chats: no subject, and a one-line AI disclosure.
+  const instagram = conversation.channel === 'instagram' || conversation.channel === 'whatsapp';
   const threaded = !instagram && conversation.subject && (await Message.exists({ conversationId: conversation._id, providerMessageId: { $ne: null } }));
   if (threaded) subject = threadSubject(conversation.subject) || subject;
   if (instagram) subject = null; // DMs have no subject
@@ -180,9 +182,10 @@ export async function deliverMessage({ messageId, approvalId }) {
     throw new NonRetryableError(suppressed);
   }
   const instagram = conversation.channel === 'instagram';
-  if (instagram) {
-    // Checked before claiming the message, so a blocked DM is never shown as sent.
-    const blocked = await instagramSendBlock(message, conversation);
+  const whatsapp = conversation.channel === 'whatsapp';
+  if (instagram || whatsapp) {
+    // Checked before claiming the message, so a blocked message is never shown as sent.
+    const blocked = instagram ? await instagramSendBlock(message, conversation) : await whatsappSendBlock(message, conversation);
     if (blocked) {
       await markFailed(message, approval, blocked);
       throw new NonRetryableError(blocked);
@@ -206,16 +209,16 @@ export async function deliverMessage({ messageId, approvalId }) {
   const user = await User.findById(message.creatorId).lean();
   const profile = await CreatorProfile.findOne({ userId: message.creatorId }).lean();
   let result;
-  if (instagram) {
+  if (instagram || whatsapp) {
     try {
-      result = await sendInstagramMessage(message, conversation);
+      result = instagram ? await sendInstagramMessage(message, conversation) : await sendWhatsAppMessage(message, conversation);
     } catch (err) {
       if (err.retryable) {
         await Message.updateOne({ _id: message._id }, { $set: { deliveryStatus: 'queued', failureReason: err.message } });
         await ApprovalRequest.updateOne({ _id: approval._id }, { $set: { executionStatus: 'queued' } });
         throw err;
       }
-      await markFailed(message, approval, err.windowClosed ? INSTAGRAM_WINDOW_CLOSED : `Instagram did not accept the message: ${err.message}`);
+      await markFailed(message, approval, err.windowClosed ? (instagram ? INSTAGRAM_WINDOW_CLOSED : WHATSAPP_WINDOW_CLOSED) : `${instagram ? 'Instagram' : 'WhatsApp'} did not accept the message: ${err.message}`);
       throw new NonRetryableError(err.message);
     }
   } else {
@@ -258,7 +261,7 @@ export async function deliverMessage({ messageId, approvalId }) {
 
   conversation.lastOutboundAt = now;
   conversation.lastMessageAt = now;
-  if (!conversation.externalThreadId && !instagram) conversation.externalThreadId = result.providerMessageId;
+  if (!conversation.externalThreadId && !instagram && !whatsapp) conversation.externalThreadId = result.providerMessageId;
   if (message.purpose === 'follow_up') conversation.followUpCount += 1;
 
   const deal = conversation.dealId ? await Deal.findById(conversation.dealId) : null;
@@ -274,7 +277,7 @@ export async function deliverMessage({ messageId, approvalId }) {
       await Opportunity.updateOne({ _id: deal.opportunityId, status: { $in: ['new', 'saved', 'outreach_drafted'] } }, { $set: { status: 'contacted' } });
     }
   }
-  if (['pitch', 'follow_up'].includes(message.purpose) && !conversation.humanTakeover && !instagram) {
+  if (['pitch', 'follow_up'].includes(message.purpose) && !conversation.humanTakeover && !instagram && !whatsapp) {
     await scheduleFollowUp(conversation, profile, now);
   }
   await conversation.save();

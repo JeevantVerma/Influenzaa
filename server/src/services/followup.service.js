@@ -25,6 +25,8 @@ export async function runFollowUpCheck({ conversationId, attempt }) {
   if (conversation.humanTakeover) return suppress(conversation, 'human_takeover');
   // Instagram only allows replies within 24 hours of the brand's last message, never a nudge after silence.
   if (conversation.channel === 'instagram') return suppress(conversation, 'instagram_no_follow_ups');
+  // WhatsApp: a message after 24 hours of silence needs a paid template and the brand's opt-in.
+  if (conversation.channel === 'whatsapp') return suppress(conversation, 'whatsapp_no_follow_ups');
   if (!fu.enabled) return suppress(conversation, 'follow_ups_disabled');
   if (conversation.followUpCount >= (fu.maxAttempts ?? 2)) return suppress(conversation, 'max_attempts_reached');
   if (conversation.lastInboundAt && (!conversation.lastOutboundAt || conversation.lastInboundAt >= conversation.lastOutboundAt)) {

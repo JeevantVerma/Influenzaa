@@ -13,11 +13,13 @@ const conversationSchema = new mongoose.Schema(
     // Opaque token used in the platform reply-to address (reply+<token>@domain)
     // so inbound replies are matched to exactly one conversation.
     replyToken: { type: String, required: true, unique: true },
+    // Code in a "Continue on WhatsApp" link; the brand's first WhatsApp message carries it, which moves this deal to WhatsApp.
+    waRef: { type: String, default: undefined },
     subject: String,
     participants: [
       new mongoose.Schema(
         // Instagram: instagramId is the brand's Instagram-scoped id (IGSID) used to reply; username is its handle.
-        { name: String, email: String, role: String, side: { type: String, enum: ['creator', 'brand'] }, instagramId: String, username: String },
+        { name: String, email: String, role: String, side: { type: String, enum: ['creator', 'brand'] }, instagramId: String, username: String, waId: String },
         { _id: false },
       ),
     ],
@@ -39,5 +41,6 @@ const conversationSchema = new mongoose.Schema(
 conversationSchema.index({ creatorId: 1, lastMessageAt: -1 });
 conversationSchema.index({ creatorId: 1, dealId: 1 });
 conversationSchema.index({ externalThreadId: 1 }, { sparse: true });
+conversationSchema.index({ waRef: 1 }, { unique: true, sparse: true });
 
 export const Conversation = mongoose.models.Conversation || mongoose.model('Conversation', conversationSchema);

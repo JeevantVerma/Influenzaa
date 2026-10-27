@@ -11,7 +11,7 @@ The core rule is enforced on the server: **nothing binding or outbound is execut
 ## Contents
 
 1. [Set up and run](#1-set-up-and-run)
-2. [Connect real services](#2-connect-real-services) (AI, Gmail, discovery, Instagram)
+2. [Connect real services](#2-connect-real-services) (AI, Gmail, discovery, Instagram, WhatsApp)
 3. [Test everything](#3-test-everything) (automated tests, live checks, hands-on walkthroughs)
 4. [Command reference](#4-command-reference)
 5. [Troubleshooting](#5-troubleshooting)
@@ -105,13 +105,34 @@ Reads brand DMs on a creator's Instagram professional account and replies throug
 
 No `.env` changes are needed for this. `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` and `INSTAGRAM_REDIRECT_URI` (HTTPS) are only for the "Connect with Instagram" login button in production. Connecting other creators' accounts needs Meta App Review for `instagram_business_manage_messages` plus Business Verification.
 
+### WhatsApp
+Brands who message the creator's WhatsApp Business number get the same negotiation as email. Unlike Instagram, WhatsApp delivers incoming messages **only by webhook**, so CreatorOS needs a public HTTPS address even while testing (a free tunnel works). Development uses Meta's free test number:
+1. **Add WhatsApp to the Meta app:** in the same Meta app, add the WhatsApp use case/product ("Connect with customers through WhatsApp"). It asks you to pick or create a Meta Business portfolio, then creates a test WhatsApp Business account with a **test phone number**.
+2. **Phone number ID and token:** WhatsApp → **API Setup**: copy the **Phone number ID** and generate an **access token**. The quick token lasts 24 hours; for a lasting one: Business settings → Users → **System users** → add one → **Generate token** for this app with `whatsapp_business_messaging` and `whatsapp_business_management`.
+3. **Recipients:** on the same page, under "To", add your friend's number (and yours), up to 5, and confirm the codes WhatsApp sends.
+4. **Server settings** in `server/.env`: `WHATSAPP_APP_SECRET` = App settings → Basic → **App secret**; `WHATSAPP_VERIFY_TOKEN` = any random string. Restart `npm run dev`.
+5. **Public URL:** install a free tunnel (`brew install cloudflared`), then, with `npm run dev` running:
+   ```bash
+   cloudflared tunnel --url http://localhost:4000
+   ```
+   It prints an address like `https://something.trycloudflare.com`. It changes every time the tunnel restarts, so repeat step 6 then.
+6. **Webhook in Meta:** WhatsApp → **Configuration** → Webhook → **Edit**: Callback URL `https://something.trycloudflare.com/api/v1/webhooks/whatsapp`, Verify token = the same string as in `.env` → **Verify and save**. Then under Webhook fields, **Subscribe** to `messages`.
+7. **CreatorOS:** Settings → Integrations → **WhatsApp**: tick the consent box, paste the phone number ID and token, **Connect WhatsApp**.
+
+How it behaves:
+- **24-hour window:** free-form replies only within 24 hours of the brand's last message; after that nothing is sent (it says so), and no automatic follow-ups are sent on WhatsApp.
+- **No cold messages:** WhatsApp requires paid, pre-approved templates and the brand's opt-in to message them first, so CreatorOS never does. Brands reach the creator through the **chat link** (Settings shows it, for bio and media kit) or **Continue on WhatsApp** on an email/Instagram deal, which carries a code that moves that deal to WhatsApp with its history.
+- **Privacy:** messages from people who aren't brands are dropped; only a keyed hash of their number is kept.
+- **Costs:** replies inside the window are service messages (Meta gives a free monthly allowance per number); templates are charged per message. Check Meta's current WhatsApp pricing for India before launch.
+- **Production:** a real number (it can't also be used in the WhatsApp app unless you use Meta's "coexistence" onboarding), Business Verification, and Embedded Signup so each creator connects their own number.
+
 ---
 
 ## 3. Test everything
 
 ### Automated tests (no keys needed)
 ```bash
-npm test        # 159 server + 4 client tests; starts its own throwaway MongoDB
+npm test        # 168 server + 4 client tests; starts its own throwaway MongoDB
 npm run lint
 npm run build
 ```
@@ -123,6 +144,7 @@ Run one server file: `cd server && npx vitest run test/integration/instagram.tes
 | AI | `npm run ai:smoke -w server` | Classification, offer extraction (incl. a prompt-injection case), pitch and negotiation drafts on fixed fictional emails. `-- --show` prints the outputs. |
 | Discovery | `npm run discovery:smoke -w server -- --source=gdelt,serper,instagram --niche=beauty` | Each source finds real brands; add `--creators=handle1,handle2` for Instagram creator mode, `--fresh` to skip the cache. |
 | Gmail | Settings → Integrations → Email outreach | Shows "Last checked … replies picked up" once the inbox checker logs in. |
+| WhatsApp | Meta → WhatsApp → Configuration → **Verify and save**, then a message from a test recipient | The webhook is reachable and signed correctly; Settings shows "Last message from WhatsApp …". |
 | Instagram | Settings → Integrations → Instagram DMs → **Check DMs now** | Shows how many brand conversations were found, or a hint if Instagram shares none. |
 
 ### Hands-on walkthrough 1: email negotiation with a friend
@@ -144,6 +166,13 @@ Needs the Instagram setup above, with the friend added as an Instagram Tester.
 2. Within a minute (or **Check DMs now**) it becomes a deal in **Inbox** (marked **DM**) and a short counter is drafted. Messages from non-brands are skipped and not stored.
 3. Approve it in **Approvals**: it is sent as a DM. The conversation shows until when you can reply (Instagram's 24-hour window).
 4. Pitching by DM: on a brand with a known Instagram handle, choose **Instagram DM**, draft, **Copy and open Instagram**, send it yourself, then **I've sent it**. CreatorOS takes over when they reply.
+
+### Hands-on walkthrough 3: WhatsApp with a friend
+Needs the WhatsApp setup above, with the tunnel and `npm run dev` running and your friend's number added under "To".
+1. Your friend sends the test number a WhatsApp message, e.g. "Hi, we'd like a paid reel collab, budget ₹10,000."
+2. Within seconds it becomes a deal in **Inbox** (marked **WhatsApp**) and a counter is drafted. A personal message ("kal cricket?") is ignored and not stored.
+3. Approve it in **Approvals**: it is sent on WhatsApp. The conversation shows until when you can reply.
+4. **Moving a deal:** open an email or Instagram conversation → **Continue on WhatsApp**. Send the copied message to the brand; when they tap the link and send its text, the deal continues on WhatsApp.
 
 ### Checking the UI
 Look at each screen at desktop width and on a phone (375px), in light and dark mode: Home, Find sponsors, a brand page, Inbox, Deals, Approvals, Settings.
@@ -180,6 +209,8 @@ Look at each screen at desktop width and on a phone (375px), in light and dark m
 | Discovery finds only demo brands | Remove `demo` from `DISCOVERY_SOURCES`; tick the real sources in Settings → Discovery. |
 | "Last search was incomplete: gdelt …" | GDELT is busy; it retries and falls back to news search through Serper (needs `SERPER_API_KEY`). |
 | Instagram: "shared no conversations" | Publish the Meta app, turn on "Allow access to messages", and make sure the sender is an accepted Instagram Tester. Then send a new DM. |
+| WhatsApp: "Verify and save" fails in Meta | `npm run dev` and the tunnel must both be running, the callback must end in `/api/v1/webhooks/whatsapp`, and the verify token must equal `WHATSAPP_VERIFY_TOKEN` (restart after editing `.env`). |
+| WhatsApp messages don't arrive | Subscribe to the `messages` webhook field; the tunnel address changes on restart (update it in Meta); the sender must be one of the test number's recipients; the token may have expired (24-hour tokens). |
 | Instagram reply "not sent: 24-hour window closed" | Instagram only allows replies within 24 hours of the brand's last DM. Reply from the Instagram app; CreatorOS can reply again after their next message. |
 | AI drafts say "written from a template" | No AI key, or the free daily quota ran out; it resumes after the quota resets. |
 | Nothing happens in the background | The worker isn't running: with `RUN_WORKER_IN_PROCESS=true` it runs inside `npm run dev`. Settings → Integrations shows its heartbeat. |
@@ -199,6 +230,7 @@ Browser ──/api/v1──▶ Express API ──▶ MongoDB ◀── Worker(s)
                          ├─ AI service layer ──────┤  (Anthropic Claude | Google Gemini | dev mock | disabled)
                          ├─ Email adapters ────────┤  (SMTP | demo | disabled; replies by IMAP or webhook)
                          ├─ Instagram DMs ─────────┤  (official Instagram API with Instagram Login)
+                         ├─ WhatsApp ──────────────┤  (official WhatsApp Business Cloud API, webhooks)
                          └─ Discovery sources ─────┘  (GDELT news | Serper search | Instagram via Apify | RSS | Brave | demo)
 ```
 
@@ -216,6 +248,7 @@ Browser ──/api/v1──▶ Express API ──▶ MongoDB ◀── Worker(s)
 | `src/services/ai/` | Provider-independent AI layer, prompts, schemas, mock provider, templates |
 | `src/services/email/` | Email adapters, envelope building, IMAP inbox checker |
 | `src/services/instagram/` | Instagram API client, DM sending (24-hour window), inbox checker, DM pitches |
+| `src/services/whatsapp/` | WhatsApp Cloud API client, signed webhook handling, brand-or-not filter, sending (24-hour window), "Continue on WhatsApp" |
 | `src/services/contacts/` | Business contacts from brands' own websites |
 | `src/jobs/` | Durable queue, worker, handlers, health |
 
@@ -314,6 +347,8 @@ All variables are in `server/.env.example` with comments. The client has no secr
 | `APIFY_MAX_USD_PER_RUN` | | Hard cost cap per Instagram scrape, default `0.5` |
 | `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`, `INSTAGRAM_REDIRECT_URI` | for Instagram login | Only for the "Connect with Instagram" button (production, HTTPS redirect). Development connects by pasting a token. |
 | `INSTAGRAM_API_VERSION`, `INSTAGRAM_POLL_DMS` | | Defaults `v26.0`, `true` (check connected inboxes every minute) |
+| `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN` | for WhatsApp | Webhook signature check (Meta app secret) and the verification string you also enter in Meta. Without them the webhook answers 503. |
+| `WHATSAPP_API_VERSION` | | Default `v26.0` |
 | `RUN_WORKER_IN_PROCESS` | | `true` in dev. In production set `false` and run `npm run worker`. |
 | `WORKER_POLL_MS`, `WORKER_LEASE_MS` | | |
 | `DEMO_FEATURES_ENABLED` / `ALLOW_DEMO_IN_PRODUCTION` | | The simulated-reply tool and the demo dataset |
@@ -332,7 +367,7 @@ Every integration reports an explicit state in Settings → Integrations:
 | AI | `connected`, `demo` (mock), `degraded` (after a recent failure), `disconnected` | Providers: Anthropic Claude (launch target) or Google Gemini (development; Interactions API with `store: false`), both sending the same prompts and validated by the same schemas. With the Anthropic SDK, requests use structured JSON output, `fallbacks: "default"` (server-side refusal fallback), typed error handling, and timeouts with retries. Model failures fall back to deterministic templates and never bypass rules. |
 | Discovery sources | per run: `ok`, `skipped`, `unavailable`, `error` | `demo` is fictional brands on the reserved `.example` TLD, labelled everywhere. `rss` reads official brand newsroom feeds the creator configures, through an SSRF-guarded fetch. `brave` uses the Brave Search API, and its results are stored as *unverified hypotheses*. |
 | Instagram DMs | `connected`, `degraded` (needs reconnecting), `disconnected` | Official Instagram API with Instagram Login; see "Instagram DMs" above. |
-| WhatsApp | `unavailable` | Planned. Requires the WhatsApp Business Platform; there are no unofficial automations. Off-platform conversations can be recorded as notes. |
+| WhatsApp | `connected`, `disconnected` (plus a warning when the server's webhook isn't configured) | Official WhatsApp Business Cloud API; see "WhatsApp" in section 2. No unofficial automations. |
 | Payments | n/a | Invoices and payment status only. "Paid" is always labelled **creator-reported**, because CreatorOS never moves or holds money. |
 
 **Integration credentials.** Instagram access tokens are stored in `integrationConnections.encryptedCredentialReference`, encrypted with AES-256-GCM under a key derived from `ENCRYPTION_KEY` (required in production; development falls back to `AUTH_SECRET`, and tokens saved under `AUTH_SECRET` still decrypt after `ENCRYPTION_KEY` is added), and are never returned by the API. Rotating `AUTH_SECRET` signs everyone out but does not disconnect integrations; rotating `ENCRYPTION_KEY` does. Before launch, move the key to a KMS or secret manager.
@@ -343,12 +378,13 @@ Every integration reports an explicit state in Settings → Integrations:
 
 How to run the tests and live checks is in [section 3](#3-test-everything). What the automated tests cover:
 
-- **Server: 159 tests** (Vitest + Supertest). They start an ephemeral `mongod`, using the locally installed binary when available (or `MONGOMS_SYSTEM_BINARY`), or connect to `TEST_MONGODB_URI`.
+- **Server: 168 tests** (Vitest + Supertest). They start an ephemeral `mongod`, using the locally installed binary when available (or `MONGOMS_SYSTEM_BINARY`), or connect to `TEST_MONGODB_URI`.
   - Unit tests: policy evaluation, counteroffers, authorised-rule checks, approval requirements, state machine, scoring, dedupe keys, amount parsing, the mock extractor, money, SSRF guard, business days, production config safety.
   - Integration tests: auth, CSRF, operator injection, password reset, ownership isolation, discovery start/pause/resume/stop, recovery after worker restart, the worker-health honesty check, source-failure → error state, quota, feed SSRF validation.
   - End-to-end API flow: register → onboard → discovery → pitch → approval → simulated send → inbound offer → analysis → counter → superseded approval → edit/reject → accept with explicit confirmation → agreement → campaign → deliverable evidence → invoice → creator-reported payment.
   - Mandatory negative tests: approval bypass, tampered approvals, prompt injection, opt-out suppression, provider failure never reported as sent, transient retry with backoff, duplicate webhook, signature check, no brand-name matching, rogue-model fallback, revoke before execution, follow-up drafting.
   - Email and negotiation: Gmail IMAP inbox checker (read-only, only reply addresses, no re-import), replies kept in one thread, brand terms carried across emails, counters stepping down, final offers, no counter after agreement, consent rules for real sending.
+  - WhatsApp (with a fake WhatsApp and signed webhooks): verification handshake, signature checks, brand vs personal messages (personal ones never stored), deals from brand messages, sends only inside the 24-hour window, failed-delivery statuses, "Continue on WhatsApp" moving a deal.
   - Instagram (with a fake Instagram): token connect and encryption, brand vs fan filtering (fans never stored), deals from brand DMs, sends only inside the 24-hour window, DM pitches sent by the creator and picked up on reply.
   - Discovery sources (with fakes): GDELT retries and news fallback, programme-page and platform filtering, Instagram partnership signals.
   - Reliability: webhook stores then the worker processes, re-queueing a stored-but-unqueued reply, no duplicate offer on retry, interrupted processing handed to the creator, concurrent outreach opens one deal, executor refuses a non-draft message before touching the deal.

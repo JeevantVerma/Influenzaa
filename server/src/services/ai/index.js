@@ -113,7 +113,7 @@ const DM_BODY_MAX_BYTES = 900;
 const tooLongForDm = (input, body) => input.channel === 'instagram' && Buffer.byteLength(body, 'utf8') > DM_BODY_MAX_BYTES;
 /** Email template → DM shape: no sign-off, compact lines. */
 function asDm(input, data) {
-  if (input.channel !== 'instagram') return data;
+  if (input.channel !== 'instagram' && input.channel !== 'whatsapp') return data;
   const body = data.body.replace(/\n\n(Best|Warm regards|Best wishes|Looking forward to it\.),?\s*$/i, '').replace(/\n{3,}/g, '\n\n').trim();
   return { ...data, body: Buffer.byteLength(body, 'utf8') > DM_BODY_MAX_BYTES ? body.slice(0, 800).replace(/\s+\S*$/, '…') : body };
 }

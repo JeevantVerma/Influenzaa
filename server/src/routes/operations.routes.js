@@ -9,6 +9,7 @@ import { exportCreatorData, deleteAccount } from '../services/account.service.js
 import { clearSessionCookies } from '../middleware/auth.js';
 import { notFound } from '../lib/errors.js';
 import * as instagram from '../services/instagram/instagram.service.js';
+import * as whatsapp from '../services/whatsapp/whatsapp.service.js';
 import { enqueueJob } from '../jobs/queue.js';
 import { getConfig } from '../config/env.js';
 
@@ -67,6 +68,8 @@ router.get('/integrations/instagram/callback', validate({ query: z.object({ code
   res.redirect(back.toString());
 });
 router.post('/integrations/instagram/token', validate({ body: S.instagramTokenSchema }), async (req, res) => res.json(await instagram.connectInstagramWithToken(me(req), req.body)));
+router.post('/integrations/whatsapp/token', validate({ body: S.whatsappTokenSchema }), async (req, res) => res.json(await whatsapp.connectWhatsAppWithToken(me(req), req.body)));
+router.post('/integrations/whatsapp/disconnect', async (req, res) => res.json(await whatsapp.disconnectWhatsApp(me(req))));
 router.post('/integrations/instagram/disconnect', async (req, res) => res.json(await instagram.disconnectInstagram(me(req))));
 router.post('/integrations/instagram/check-now', async (req, res) => {
   const { job } = await enqueueJob({ jobType: 'inbound.instagram_poll', creatorId: me(req), payload: { creatorId: String(me(req)) }, idempotencyKey: `inbound:instagram:${me(req)}:${Math.floor(Date.now() / 30_000)}`, maxAttempts: 1 });

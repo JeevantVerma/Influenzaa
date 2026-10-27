@@ -8,9 +8,9 @@ import {
   brandSignalsJsonSchema,
   brandSignalsZod,
 } from './schemas.js';
-import { CLASSIFY_SYSTEM, EXTRACT_SYSTEM, PITCH_SYSTEM, NEGOTIATION_SYSTEM, BRAND_SIGNALS_SYSTEM, DM_STYLE } from './prompts.js';
+import { CLASSIFY_SYSTEM, EXTRACT_SYSTEM, PITCH_SYSTEM, NEGOTIATION_SYSTEM, BRAND_SIGNALS_SYSTEM, DM_STYLE, WHATSAPP_STYLE } from './prompts.js';
 
-const channelNote = (channel) => (channel === 'instagram' ? `${DM_STYLE}\n` : '');
+const channelNote = (channel) => (channel === 'instagram' ? `${DM_STYLE}\n` : channel === 'whatsapp' ? `${WHATSAPP_STYLE}\n` : '');
 
 // Provider-independent task definitions: the exact system prompt, user
 // message, output schema and validator for each AI task. Every live provider

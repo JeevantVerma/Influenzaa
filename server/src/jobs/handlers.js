@@ -7,6 +7,7 @@ import { processInboundMessage, flagInboundForReview } from '../services/negotia
 import { discoverBrandContacts, onContactDiscoveryExhausted } from '../services/contacts/contactDiscovery.service.js';
 import { pollImapInbox } from '../services/email/imapInbox.js';
 import { pollAllInstagramInboxes, pollInstagramInbox, refreshInstagramTokens } from '../services/instagram/instagram.service.js';
+import { processWhatsAppMessage } from '../services/whatsapp/whatsapp.service.js';
 
 // jobType → handler. Each handler must be idempotent: a job may run more than
 // once if a worker dies after doing the work but before recording success.
@@ -31,6 +32,9 @@ export const HANDLERS = {
   },
   'inbound.instagram_poll': {
     run: (job) => (job.payload?.creatorId ? pollInstagramInbox(job.payload.creatorId) : pollAllInstagramInboxes()),
+  },
+  'inbound.whatsapp_message': {
+    run: (job) => processWhatsAppMessage(job),
   },
   'maintenance.instagram_tokens': {
     run: () => refreshInstagramTokens(),

@@ -10,13 +10,13 @@ export function hasWorkInFlight(messages = []) {
   return messages.some((m) => ['queued', 'sending'].includes(m.deliveryStatus) || ['pending', 'processing'].includes(m.inboundProcessing?.status));
 }
 
-export function MessageView({ m }) {
+export function MessageView({ m, brandName }) {
   const [expanded, setExpanded] = useState(false);
   const d = DELIVERY_LABELS[m.deliveryStatus] || { label: m.deliveryStatus, tone: '' };
   const side = m.direction === 'note' ? 'note' : m.direction === 'inbound' ? 'them' : 'you';
   const draft = m.deliveryStatus === 'draft';
   const who =
-    m.direction === 'inbound' ? m.fromAddress || 'Brand'
+    m.direction === 'inbound' ? (m.channel === 'whatsapp' ? brandName || 'Brand' : m.fromAddress || 'Brand')
       : m.direction === 'note' ? 'Your note'
         : draft ? (m.senderType === 'creator' ? 'Your draft' : 'Draft for you')
           : 'You';
@@ -40,15 +40,15 @@ export function MessageView({ m }) {
       {m.subject && m.direction !== 'note' && <div className="bubble-subject">{m.subject}</div>}
       <div className={`bubble-body ${long && !expanded ? 'clamped' : ''}`}>{body}</div>
       {long && <button type="button" className="link-btn" onClick={() => setExpanded(!expanded)}>{expanded ? 'Show less' : 'Show all'}</button>}
-      {footer && <div className="bubble-footer" title={footer}>{m.channel === 'instagram' ? '+ one-line note that CreatorOS (AI-assisted) helped' : '+ CreatorOS footer (your name, AI note, unsubscribe line)'}</div>}
+      {footer && <div className="bubble-footer" title={footer}>{m.channel === 'instagram' || m.channel === 'whatsapp' ? '+ one-line note that CreatorOS (AI-assisted) helped' : '+ CreatorOS footer (your name, AI note, unsubscribe line)'}</div>}
       {m.failureReason && m.deliveryStatus === 'failed' && <div className="small" style={{ color: 'var(--danger)', marginTop: 6 }}>Not sent: {m.failureReason}</div>}
     </article>
   );
 }
 
-export function ConversationTimeline({ messages = [] }) {
+export function ConversationTimeline({ messages = [], brandName }) {
   if (!messages.length) return <p className="muted small">No messages yet.</p>;
-  return <div className="timeline">{messages.map((m) => <MessageView key={m._id} m={m} />)}</div>;
+  return <div className="timeline">{messages.map((m) => <MessageView key={m._id} m={m} brandName={brandName} />)}</div>;
 }
 
 // ---- Terms comparison ------------------------------------------------------------------

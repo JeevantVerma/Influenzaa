@@ -100,6 +100,18 @@ const integrationConnectionSchema = new mongoose.Schema(
       // Conversations Instagram returned on the last check (0 usually means message access is off).
       lastConversationCount: Number,
     },
+    // WhatsApp Business number connected through the Cloud API.
+    whatsapp: {
+      phoneNumberId: String,
+      displayPhoneNumber: String,
+      verifiedName: String,
+      qualityRating: String,
+      connectedVia: { type: String, enum: ['token'] },
+      // Messages that arrived before connecting are never imported.
+      importFrom: Date,
+      lastWebhookAt: Date,
+      brandThreads: { type: Number, default: 0 },
+    },
     connectedAt: Date,
     disconnectedAt: Date,
     lastSuccessfulSyncAt: Date,
@@ -124,6 +136,21 @@ const instagramThreadSchema = new mongoose.Schema(
   { timestamps: true },
 );
 instagramThreadSchema.index({ creatorId: 1, igConversationId: 1 }, { unique: true });
+
+// ---- WhatsApp senders seen by the webhook ---------------------------------------
+// One row per sender (per creator), keyed by a keyed hash of their WhatsApp id so
+// personal numbers are never stored for "ignored" senders (fans, friends, spam).
+const whatsAppContactSchema = new mongoose.Schema(
+  {
+    creatorId: { type: objectId, ref: 'User', required: true },
+    waIdHash: { type: String, required: true },
+    status: { type: String, enum: ['brand', 'ignored'], required: true },
+    conversationId: { type: objectId, ref: 'Conversation', default: null },
+    lastSeenAt: Date,
+  },
+  { timestamps: true },
+);
+whatsAppContactSchema.index({ creatorId: 1, waIdHash: 1 }, { unique: true });
 
 // ---- Inbound mailbox cursor (IMAP polling) -----------------------------------
 // Where the inbox checker stopped, so each message is read once. uidValidity
@@ -156,3 +183,4 @@ export const IntegrationConnection =
 export const Counter = mongoose.models.Counter || mongoose.model('Counter', counterSchema);
 export const MailboxCursor = mongoose.models.MailboxCursor || mongoose.model('MailboxCursor', mailboxCursorSchema);
 export const InstagramThread = mongoose.models.InstagramThread || mongoose.model('InstagramThread', instagramThreadSchema);
+export const WhatsAppContact = mongoose.models.WhatsAppContact || mongoose.model('WhatsAppContact', whatsAppContactSchema);

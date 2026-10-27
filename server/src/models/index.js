@@ -13,4 +13,4 @@ export { DiscoveryCache } from './DiscoveryCache.js';
 export { ApprovalRequest } from './ApprovalRequest.js';
 export { Campaign } from './Campaign.js';
 export { Invoice } from './Invoice.js';
-export { ScheduledJob, WorkerHeartbeat, AuditEvent, Notification, IntegrationConnection, Counter, MailboxCursor, InstagramThread } from './System.js';
+export { ScheduledJob, WorkerHeartbeat, AuditEvent, Notification, IntegrationConnection, Counter, MailboxCursor, InstagramThread, WhatsAppContact } from './System.js';

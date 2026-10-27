@@ -8,6 +8,7 @@ import { getConfig } from '../config/env.js';
 import { recordAudit } from './audit.service.js';
 import { conflict } from '../lib/errors.js';
 import { instagramStatus } from './instagram/instagram.service.js';
+import { whatsappStatus } from './whatsapp/whatsapp.service.js';
 
 export const EMAIL_CONSENT_TEXT =
   'I authorise CreatorOS to send sponsorship emails on my behalf from the sending address shown here, showing my name, with replies routed back to CreatorOS. Messages disclose that they are AI-assisted. I can disconnect at any time.';
@@ -47,10 +48,7 @@ export async function listIntegrations(creatorId) {
     ai: aiStatus(),
     discoverySources: platformSources().map((s) => ({ id: s.id, label: s.label, isDemo: s.isDemo })),
     worker,
-    whatsapp: {
-      status: 'unavailable',
-      detail: 'Planned. Requires an approved WhatsApp Business Platform account, message templates and opt-in. CreatorOS never accesses personal WhatsApp inboxes.',
-    },
+    whatsapp: await whatsappStatus(creatorId),
     demoFeaturesEnabled: getConfig().demo.enabled,
   };
 }

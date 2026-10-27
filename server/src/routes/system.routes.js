@@ -12,6 +12,7 @@ import { recordAudit } from '../services/audit.service.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { aiStatus, aiUsageTotals } from '../services/ai/index.js';
 import { z } from 'zod';
+import { handleWhatsAppWebhook } from '../services/whatsapp/whatsapp.service.js';
 
 export const healthRouter = Router();
 
@@ -53,6 +54,35 @@ function verifySignature(req) {
   if (!safeEqual(expected, sig)) return { ok: false, status: 401, message: 'Invalid signature' };
   return { ok: true };
 }
+
+// WhatsApp Cloud API webhook. GET is Meta's one-time verification handshake;
+// POST bodies are signed: X-Hub-Signature-256 = sha256=HMAC-SHA256(app secret, raw body).
+webhookRouter.get('/whatsapp', (req, res) => {
+  const { verifyToken, webhookConfigured } = getConfig().whatsapp;
+  if (!webhookConfigured) return res.status(503).json({ error: { code: 'not_configured', message: 'WhatsApp webhook is not configured on this server' } });
+  const mode = String(req.query['hub.mode'] || '');
+  const token = String(req.query['hub.verify_token'] || '');
+  const challenge = String(req.query['hub.challenge'] || '');
+  if (mode !== 'subscribe' || !safeEqual(token, verifyToken)) return res.status(403).json({ error: { code: 'forbidden', message: 'Verify token does not match' } });
+  res.type('text/plain').send(challenge);
+});
+
+webhookRouter.post('/whatsapp', express.raw({ type: 'application/json', limit: '1mb' }), async (req, res) => {
+  const { appSecret, webhookConfigured } = getConfig().whatsapp;
+  if (!webhookConfigured) return res.status(503).json({ error: { code: 'not_configured', message: 'WhatsApp webhook is not configured on this server' } });
+  const sig = String(req.get('x-hub-signature-256') || '').replace(/^sha256=/, '');
+  const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from('');
+  if (!sig || !safeEqual(hmac(appSecret, raw), sig)) return res.status(401).json({ error: { code: 'invalid_signature', message: 'Invalid signature' } });
+  let body;
+  try {
+    body = JSON.parse(raw.toString('utf8'));
+  } catch {
+    return res.status(400).json({ error: { code: 'bad_request', message: 'Invalid payload' } });
+  }
+  // Only queues work, so Meta gets a fast 200.
+  const result = await handleWhatsAppWebhook(body);
+  res.json({ received: true, queued: result.queued });
+});
 
 webhookRouter.post('/email', express.raw({ type: 'application/json', limit: '1mb' }), async (req, res) => {
   const v = verifySignature(req);

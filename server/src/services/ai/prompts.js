@@ -24,6 +24,12 @@ export const DM_STYLE = `channel: instagram_dm. This is an Instagram direct mess
 - Friendly and direct, a few short lines. A greeting such as "Hi <brand> team!" is fine; no sign-off line, no "Best,".
 - Still return a short subject (it is not shown).`;
 
+// Added to the task when the message is a WhatsApp chat message.
+export const WHATSAPP_STYLE = `channel: whatsapp. This is a WhatsApp chat message, not an email:
+- Short and conversational: 20-90 words, a few short lines. No subject line in the text, no sign-off line, no "Best,".
+- A greeting such as "Hi <brand> team!" is fine for the first reply; later replies can start directly.
+- Still return a short subject (it is not shown).`;
+
 export const CLASSIFY_SYSTEM = `You classify inbound replies to sponsorship outreach for an Indian creator's talent-management assistant.
 ${GUARDRAILS}
 Intents: acceptance (agrees to the creator's proposal or confirms the deal is on, e.g. "deal done", "we accept your terms", "agreed"; logistics such as dates or documents may follow), offer (proposes or changes concrete commercial terms such as an amount, barter product, or deliverables), positive_interest (interested but no terms), information_request (asks for rates, media kit, audience data), decline (not interested), opt_out (asks not to be contacted again / unsubscribe), out_of_office (auto-reply), question (other question), other.

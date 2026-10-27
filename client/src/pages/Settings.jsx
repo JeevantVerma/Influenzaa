@@ -5,7 +5,7 @@ import { useApi, useAction, useTaxonomy } from '../api/hooks.js';
 import { patch, post, del, get } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { IdentityForm, AudienceForm, CommercialForm } from '../components/ProfileForms.jsx';
-import { AutonomyPanel, EmailAuthorizationPanel, InstagramPanel, PreferencesForm } from '../components/AutomationPanels.jsx';
+import { AutonomyPanel, EmailAuthorizationPanel, InstagramPanel, PreferencesForm, WhatsAppPanel } from '../components/AutomationPanels.jsx';
 import { DiscoveryControl } from '../components/DiscoveryControl.jsx';
 import { Badge, Button, Card, ConfirmDialog, ErrorState, Field, LoadingCard, Tabs } from '../components/ui.jsx';
 import { useToast } from '../components/Toast.jsx';
@@ -125,12 +125,12 @@ function Integrations() {
     <div className="stack lg">
       <EmailAuthorizationPanel />
       <InstagramPanel />
+      <WhatsAppPanel />
       <Card title="Integration status" bodyClass="">
         <div className="list">
           {row(`AI provider${i.ai.model ? ` · ${i.ai.model}` : ''}`, i.ai.status, i.ai.detail, { connected: 'success', demo: 'demo', degraded: 'warning', disconnected: '' }[i.ai.status])}
           {row('Background worker', i.worker.healthy ? 'healthy' : 'offline', i.worker.healthy ? `${i.worker.activeWorkers} worker(s), last heartbeat ${dateTime(i.worker.lastHeartbeatAt)}` : 'No recent heartbeat. Scheduled discovery, sending and follow-ups are paused until a worker runs.', i.worker.healthy ? 'success' : 'danger')}
           {row('Discovery sources', `${i.discoverySources.length} available`, i.discoverySources.map((s) => s.label).join(' · '), 'info')}
-          {row('WhatsApp Business', 'unavailable', i.whatsapp.detail, '')}
         </div>
       </Card>
     </div>

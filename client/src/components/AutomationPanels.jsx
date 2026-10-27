@@ -190,6 +190,70 @@ export function InstagramPanel() {
   );
 }
 
+/** WhatsApp: connect a WhatsApp Business number (Cloud API); brands message it, CreatorOS negotiates. */
+export function WhatsAppPanel() {
+  const q = useApi('integrations', '/integrations');
+  const [consent, setConsent] = useState(false);
+  const [form, setForm] = useState({ phoneNumberId: '', accessToken: '' });
+  const [copied, setCopied] = useState(false);
+  const connect = useAction(() => post('/integrations/whatsapp/token', { ...form, consent: true }), {
+    invalidate: ['integrations'], success: 'WhatsApp connected', onSuccess: () => setForm({ phoneNumberId: '', accessToken: '' }),
+  });
+  const disconnect = useAction(() => post('/integrations/whatsapp/disconnect'), { invalidate: ['integrations'], success: 'WhatsApp disconnected' });
+  const wa = q.data?.whatsapp;
+  if (!wa) return null;
+  const connected = wa.status === 'connected';
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(wa.chatLink);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <Card title="WhatsApp" actions={<Badge tone={connected ? 'success' : ''}>{connected ? wa.displayPhoneNumber : 'Not connected'}</Badge>}>
+      <div className="stack">
+        <p className="small muted">
+          Connect a WhatsApp Business number. Brands who message it get the same negotiation as email: CreatorOS reads their offers and drafts the replies. Messages from people who aren't brands are skipped and never stored.
+          WhatsApp only allows replies within 24 hours of the brand's last message, and businesses can't message a brand first, so share your WhatsApp link (bio, media kit, or "Continue on WhatsApp" in a deal).
+        </p>
+        {!wa.webhookConfigured && (
+          <div className="callout warning small">This server can't receive WhatsApp messages yet: set WHATSAPP_APP_SECRET and WHATSAPP_VERIFY_TOKEN in server/.env and register the webhook in Meta (see the README).</div>
+        )}
+        {connected ? (
+          <>
+            <dl className="kv small">
+              <dt>Number</dt><dd>{wa.displayPhoneNumber}{wa.verifiedName ? ` · ${wa.verifiedName}` : ''}{wa.qualityRating ? ` · quality ${wa.qualityRating.toLowerCase()}` : ''}</dd>
+              <dt>Messages</dt>
+              <dd>{wa.lastWebhookAt ? <span className="muted">Last message from WhatsApp {relative(wa.lastWebhookAt)} · {wa.brandThreads} brand conversation{wa.brandThreads === 1 ? '' : 's'}.</span> : <span className="muted">Nothing received yet. New messages arrive within seconds once the webhook is set up.</span>}</dd>
+              <dt>Your chat link</dt><dd className="mono small">{wa.chatLink}</dd>
+            </dl>
+            <div className="row wrap">
+              <Button size="sm" onClick={copyLink}>{copied ? 'Copied' : 'Copy chat link'}</Button>
+              <Button variant="danger" size="sm" loading={disconnect.isPending} onClick={() => disconnect.mutate()}>Disconnect</Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <label className="checkbox small">
+              <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+              <span>{wa.consentText}</span>
+            </label>
+            <Field label="Phone number ID" hint="Meta app dashboard → WhatsApp → API Setup → Phone number ID (a long number, not the phone number itself).">
+              <input inputMode="numeric" autoComplete="off" value={form.phoneNumberId} onChange={(e) => setForm((f) => ({ ...f, phoneNumberId: e.target.value }))} placeholder="1234567890…" />
+            </Field>
+            <Field label="Access token" hint="From the same page (temporary, 24 hours) or a permanent system-user token from Business settings.">
+              <input type="password" autoComplete="off" value={form.accessToken} onChange={(e) => setForm((f) => ({ ...f, accessToken: e.target.value }))} placeholder="EAA…" />
+            </Field>
+            <div><Button variant="primary" disabled={!consent || form.accessToken.trim().length < 20 || !/^\d{5,}$/.test(form.phoneNumberId.trim())} loading={connect.isPending} onClick={() => connect.mutate()}>Connect WhatsApp</Button></div>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 /** Follow-ups, approval categories, notifications (profile patch). */
 export function PreferencesForm({ profile, onSave, saving, submitLabel = 'Save', secondary }) {
   const tax = useTaxonomy();

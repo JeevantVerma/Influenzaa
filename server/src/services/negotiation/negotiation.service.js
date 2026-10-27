@@ -6,6 +6,7 @@ import { toMinor } from '../../lib/money.js';
 import { hashObject } from '../../lib/crypto.js';
 import { cancelPendingJobs, enqueueJob } from '../../jobs/queue.js';
 import { replyTokenFromAddresses } from '../email/index.js';
+import { waKey } from '../whatsapp/keys.js';
 import { classifyInbound, extractOffer, draftNegotiation, aiStatus } from '../ai/index.js';
 import { evaluateOffer, buildCounterTerms, counterWithinAuthorizedRules, negotiationContext, fillUnstatedTerms } from './policy.js';
 import { transition, tryTransition } from './stateMachine.js';
@@ -35,7 +36,7 @@ async function context(creatorId, deal) {
 
 function brandRecipients(conversation) {
   // Email address, or @handle for Instagram (used for suppression checks; DMs go to the brand's Instagram id).
-  return conversation.participants.filter((p) => p.side === 'brand' && (p.email || p.username)).map((p) => p.email || `@${p.username}`);
+  return conversation.participants.filter((p) => p.side === 'brand' && (p.email || p.username || p.waId)).map((p) => p.email || (p.waId ? waKey(p.waId) : `@${p.username}`));
 }
 
 /** Converts AI/mock extraction output (major units) into stored terms (minor units). */
@@ -321,7 +322,7 @@ export async function requestAcceptance(creatorId, dealId, { termsVersion, creat
   for (const c of evaluation.approvalCategories) if (c !== 'accept_or_reject_offer') reasons.push({ code: c, label: c.replace(/_/g, ' ') });
   const approval = await createApproval({
     creatorId, deal, conversation, message, actionType: 'accept_offer', createdBy,
-    proposedAction: { channel: conversation.channel === 'instagram' ? 'instagram' : 'email', messageId: String(message._id), to: message.toAddresses, subject: message.subject, content: message.content, purpose: 'acceptance', terms, termsHash: hashObject(terms) },
+    proposedAction: { channel: ['instagram', 'whatsapp'].includes(conversation.channel) ? conversation.channel : 'email', messageId: String(message._id), to: message.toAddresses, subject: message.subject, content: message.content, purpose: 'acceptance', terms, termsHash: hashObject(terms) },
     reasons, policyChecks: evaluation.checks, requiresExplicitConfirmation: true,
     contextSnapshot: { brandName: brand.name, offerValueMinor: evaluation.offerValueMinor, benchmarkValueMinor: evaluation.benchmarkValueMinor, floorValueMinor: evaluation.floorValueMinor, recommendation: evaluation.recommendation },
   });
@@ -336,7 +337,7 @@ export async function requestDecline(creatorId, dealId, { reason }) {
   const message = await createDraft({ conversation, purpose: 'decline', subject: draft.data.subject, body: draft.data.body, creatorName, ai: draft, to: brandRecipients(conversation) });
   const approval = await createApproval({
     creatorId, deal, conversation, message, actionType: 'decline_offer', createdBy: 'creator',
-    proposedAction: { channel: conversation.channel === 'instagram' ? 'instagram' : 'email', messageId: String(message._id), to: message.toAddresses, subject: message.subject, content: message.content, purpose: 'decline', reason: reason || null },
+    proposedAction: { channel: ['instagram', 'whatsapp'].includes(conversation.channel) ? conversation.channel : 'email', messageId: String(message._id), to: message.toAddresses, subject: message.subject, content: message.content, purpose: 'decline', reason: reason || null },
     reasons: [{ code: 'accept_or_reject_offer', label: 'Rejecting a sponsorship offer' }],
     contextSnapshot: { brandName: brand.name },
   });
@@ -385,7 +386,7 @@ export async function sendCreatorMessage(creatorId, conversationId, { subject, c
   await message.updateOne({ senderType: 'creator' });
   const approval = await createApproval({
     creatorId, deal, conversation, message, actionType: 'send_reply', createdBy: 'creator',
-    proposedAction: { channel: conversation.channel === 'instagram' ? 'instagram' : 'email', messageId: String(message._id), to: message.toAddresses, subject: message.subject, content: message.content, purpose: 'reply' },
+    proposedAction: { channel: ['instagram', 'whatsapp'].includes(conversation.channel) ? conversation.channel : 'email', messageId: String(message._id), to: message.toAddresses, subject: message.subject, content: message.content, purpose: 'reply' },
     reasons: [{ code: 'creator_authored', label: 'Written and sent by you' }],
   });
   // The creator's own send is the approval; it goes through the same executor.

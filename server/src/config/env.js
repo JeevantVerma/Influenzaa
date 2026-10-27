@@ -77,6 +77,12 @@ const schema = z.object({
   INSTAGRAM_API_VERSION: z.string().default('v26.0'),
   INSTAGRAM_POLL_DMS: bool(true), // check connected inboxes every minute (development; production adds webhooks)
 
+  // WhatsApp (official WhatsApp Business Cloud API). Incoming messages arrive only by webhook:
+  // the Meta app's secret signs them, and the verify token is any string you also enter in Meta.
+  WHATSAPP_APP_SECRET: optionalString,
+  WHATSAPP_VERIFY_TOKEN: optionalString,
+  WHATSAPP_API_VERSION: z.string().default('v26.0'),
+
   // Worker
   RUN_WORKER_IN_PROCESS: bool(true),
   WORKER_POLL_MS: z.coerce.number().int().positive().default(5000),
@@ -200,6 +206,12 @@ function buildConfig(raw) {
       apiVersion: e.INSTAGRAM_API_VERSION,
       pollDms: e.INSTAGRAM_POLL_DMS,
       loginConfigured: !!(e.INSTAGRAM_APP_ID && e.INSTAGRAM_APP_SECRET && e.INSTAGRAM_REDIRECT_URI),
+    },
+    whatsapp: {
+      appSecret: e.WHATSAPP_APP_SECRET,
+      verifyToken: e.WHATSAPP_VERIFY_TOKEN,
+      apiVersion: e.WHATSAPP_API_VERSION,
+      webhookConfigured: !!(e.WHATSAPP_APP_SECRET && e.WHATSAPP_VERIFY_TOKEN),
     },
     worker: {
       inProcess: e.RUN_WORKER_IN_PROCESS,

@@ -84,6 +84,17 @@ function ConversationPane({ id }) {
   const [msg, setMsg] = useState({ subject: '', content: '' });
   const [confirmSend, setConfirmSend] = useState(false);
   const inv = ['conversation', 'conversations', 'approvals', 'dashboard'];
+  const [waLink, setWaLink] = useState(null);
+  const continueOnWa = useAction(() => post(`/conversations/${id}/whatsapp-link`), {
+    onSuccess: async (r) => {
+      setWaLink(r);
+      try {
+        await navigator.clipboard.writeText(r.message);
+      } catch {
+        /* clipboard blocked: the text is shown to copy by hand */
+      }
+    },
+  });
   const markDmSent = useAction(() => post(`/conversations/${id}/instagram-pitch-sent`), { invalidate: inv, success: 'Marked as sent. Their reply will appear here.' });
   const draft = useAction(() => post(`/conversations/${id}/draft-response`, {}), { invalidate: inv, success: (r) => (r.autoAuthorized ? 'Reply queued under your rules' : 'AI draft created — review it in Approvals') });
   const takeover = useAction((enabled) => post(`/conversations/${id}/takeover`, { enabled }), { invalidate: inv, success: (r) => (r.humanTakeover ? 'You have taken over. AI drafting and follow-ups are paused here.' : 'Handed back to CreatorOS') });
@@ -107,10 +118,16 @@ function ConversationPane({ id }) {
           {c.status !== 'open' && <Badge tone="warning">{humanize(c.status)}</Badge>}
         </div>
         <span className="small muted">
-          {c.channel === 'instagram' ? <>Instagram DM{brandP?.username && <> · <a href={`https://www.instagram.com/${brandP.username}/`} target="_blank" rel="noopener noreferrer">@{brandP.username}</a></>}</> : [brandP?.name, brandP?.role].filter(Boolean).join(' · ')}
+          {c.channel === 'whatsapp' ? <>WhatsApp · {brandP?.name}</> : c.channel === 'instagram' ? <>Instagram DM{brandP?.username && <> · <a href={`https://www.instagram.com/${brandP.username}/`} target="_blank" rel="noopener noreferrer">@{brandP.username}</a></>}</> : [brandP?.name, brandP?.role].filter(Boolean).join(' · ')}
           {brandP?.email && <> · <span className="mono">{brandP.email}</span></>}
         </span>
         {c.channel === 'instagram' && <InstagramStatus c={c} onSent={() => markDmSent.mutate()} sending={markDmSent.isPending} />}
+        {c.channel === 'whatsapp' && c.replyWindow?.closesAt && (c.replyWindow.open ? (
+          <div className="callout info small">WhatsApp lets you reply until {dateTime(c.replyWindow.closesAt)} ({relative(c.replyWindow.closesAt)}). Each new message from the brand restarts this 24-hour window.</div>
+        ) : (
+          <div className="callout warning small">WhatsApp's 24-hour reply window has closed. Reply from WhatsApp yourself; CreatorOS can reply again after the brand's next message.</div>
+        ))}
+        {waLink && <div className="callout info small"><span className="grow">Copied: send this to the brand. When they tap it and send the message, this deal continues on WhatsApp.<br /><span className="mono tiny">{waLink.message}</span></span></div>}
         {c.pendingApprovals.length > 0 && (
           <div className="callout warning small"><span className="grow">{c.pendingApprovals.length} draft{c.pendingApprovals.length > 1 ? 's' : ''} waiting for your OK.</span><Link className="btn sm" to="/approvals">Review</Link></div>
         )}
@@ -121,11 +138,14 @@ function ConversationPane({ id }) {
           <Button icon="mail" onClick={() => setComposing(true)} disabled={c.status !== 'open'}>Write it myself</Button>
           <Button onClick={() => setNoteOpen(true)}>Add note</Button>
           {c.deal && <Link className="btn" to={`/negotiations/${c.dealId}`}>Open deal</Link>}
+          {integrations.data?.whatsapp?.status === 'connected' && c.channel !== 'whatsapp' && c.status === 'open' && c.deal && (
+            <Button onClick={() => continueOnWa.mutate()} loading={continueOnWa.isPending}>Continue on WhatsApp</Button>
+          )}
           {demo && c.status === 'open' && <Button variant="ghost" onClick={() => setSimulating(true)}>Simulate brand reply</Button>}
         </div>
       </div>
 
-      <ConversationTimeline messages={c.messages} />
+      <ConversationTimeline messages={c.messages} brandName={brandP?.name} />
 
       <Disclosure title="Conversation settings" meta={c.nextFollowUpAt ? `follow-up ${relative(c.nextFollowUpAt)}` : c.humanTakeover ? 'you are handling it' : null}>
         <div className="stack">
@@ -182,6 +202,7 @@ export default function InboxPage() {
                 <span className="row">
                   <span className={`grow truncate ${c.unreadInbound ? 'strong' : ''}`} style={{ fontWeight: 650 }}>{c.brand?.name}</span>
                   {c.channel === 'instagram' && <Badge tone="info">DM</Badge>}
+                  {c.channel === 'whatsapp' && <Badge tone="info">WhatsApp</Badge>}
                   {c.unreadInbound > 0 && <span className="unread-dot" aria-label="Unread" />}
                   <span className="tiny faint">{relative(c.lastMessageAt || c.updatedAt)}</span>
                 </span>

@@ -104,6 +104,7 @@ export const EVIDENCE_SOURCES = {
   serper: 'Web search',
   instagram: 'Instagram (via Apify)',
   instagram_dm: 'Instagram DM',
+  whatsapp: 'WhatsApp',
   brand_website: "Brand's own website",
   manual: 'Added manually',
 };
